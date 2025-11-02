@@ -81,6 +81,8 @@ const PredictionForm: React.FC<PredictionFormProps> = ({ onPredict, loading = fa
             <Option value={5}>5天</Option>
             <Option value={7}>7天</Option>
             <Option value={10}>10天</Option>
+            <Option value={14}>14天</Option>
+            <Option value={20}>20天</Option>
           </Select>
         </Form.Item>
 

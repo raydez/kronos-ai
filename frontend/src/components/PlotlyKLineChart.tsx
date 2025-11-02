@@ -8,6 +8,7 @@ interface PlotlyKLineChartProps {
   title: string;
   historicalData: StockData[];
   predictionData: PredictionData[];
+  actualData?: StockData[]; // 预测时间段的实际数据
   loading?: boolean;
 }
 
@@ -15,8 +16,19 @@ const PlotlyKLineChart: React.FC<PlotlyKLineChartProps> = ({
   title,
   historicalData,
   predictionData,
+  actualData = [],
   loading = false
 }) => {
+  
+  // 调试信息
+  console.log('📊 PlotlyKLineChart 数据:', {
+    历史数据条数: historicalData.length,
+    预测数据条数: predictionData.length,
+    实际数据条数: actualData.length,
+    历史数据日期范围: historicalData.length > 0 ? `${historicalData[0].date} 到 ${historicalData[historicalData.length-1].date}` : '无',
+    预测数据日期范围: predictionData.length > 0 ? `${predictionData[0].date} 到 ${predictionData[predictionData.length-1].date}` : '无',
+    实际数据日期范围: actualData.length > 0 ? `${actualData[0].date} 到 ${actualData[actualData.length-1].date}` : '无'
+  });
 
   // 准备图表数据
   const prepareChartData = (): Data[] => {
@@ -49,7 +61,34 @@ const PlotlyKLineChart: React.FC<PlotlyKLineChartProps> = ({
       decreasing: { line: { color: '#00ff00' }, fillcolor: '#00ff00' }  // 绿色下跌
     } as Data);
 
-    // 预测数据K线图 - 单一蓝色，虚线外框
+    // 预测时间段的实际数据K线图 - 橙色边框，半透明填充
+    if (actualData && actualData.length > 0) {
+      const actualDates = actualData.map((item: any) => item.date);
+      const actualOpen = actualData.map((item: any) => item.open);
+      const actualHigh = actualData.map((item: any) => item.high);
+      const actualLow = actualData.map((item: any) => item.low);
+      const actualClose = actualData.map((item: any) => item.close);
+
+      traces.push({
+        x: actualDates,
+        open: actualOpen,
+        high: actualHigh,
+        low: actualLow,
+        close: actualClose,
+        type: 'candlestick',
+        name: '实际走势',
+        increasing: { 
+          line: { color: '#ff8c00', width: 2 }, 
+          fillcolor: 'rgba(255, 140, 0, 0.3)' 
+        }, // 橙色上涨，半透明填充
+        decreasing: { 
+          line: { color: '#ff8c00', width: 2 }, 
+          fillcolor: 'rgba(255, 140, 0, 0.3)' 
+        }  // 橙色下跌，半透明填充
+      } as Data);
+    }
+
+    // 预测数据K线图 - 蓝色虚线
     if (predictionData.length > 0) {
       traces.push({
         x: predictionDates,
@@ -61,12 +100,12 @@ const PlotlyKLineChart: React.FC<PlotlyKLineChartProps> = ({
         name: '预测数据',
         increasing: { 
           line: { color: '#1890ff', width: 2, dash: 'dash' }, 
-          fillcolor: '#1890ff' 
-        }, // 蓝色上涨，虚线外框
+          fillcolor: 'rgba(24, 144, 255, 0.2)' 
+        }, // 蓝色上涨，虚线外框，半透明填充
         decreasing: { 
           line: { color: '#1890ff', width: 2, dash: 'dash' }, 
-          fillcolor: '#1890ff' 
-        }  // 蓝色下跌，虚线外框
+          fillcolor: 'rgba(24, 144, 255, 0.2)' 
+        }  // 蓝色下跌，虚线外框，半透明填充
       } as Data);
     }
 

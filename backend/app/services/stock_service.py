@@ -16,7 +16,7 @@ class StockService:
     """股票数据服务"""
     
     def __init__(self):
-        self.cache_dir = Path(__file__).parent.parent.parent.parent / "data" / "cache"
+        self.cache_dir = Path(__file__).parent.parent.parent / "data" / "cache"
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._cache = {}
     

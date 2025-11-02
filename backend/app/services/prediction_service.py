@@ -36,7 +36,7 @@ class PredictionService:
                 raise ValueError(f"股票 {code} 的历史数据不足")
             
             # 使用Kronos模型进行预测
-            predictions = await self._predict_with_kronos(stock_data, prediction_days, code)
+            predictions = await self._predict_with_kronos(stock_data, prediction_days, code, start_date)
             
             # 构建响应
             model_info = ModelInfo(**model_manager.get_model_info())
@@ -54,13 +54,13 @@ class PredictionService:
             logger.error(f"预测股票 {code} 失败: {e}")
             raise
     
-    async def _predict_with_kronos(self, stock_data: List[Dict[str, Any]], prediction_days: int, code: str) -> List[PredictionPoint]:
+    async def _predict_with_kronos(self, stock_data: List[Dict[str, Any]], prediction_days: int, code: str, start_date: Optional[str] = None) -> List[PredictionPoint]:
         """使用Kronos模型进行预测"""
         try:
             # 获取模型使用权
             async with model_manager.get_model() as model:
                 # 进行预测
-                predictions = model.predict_stock(stock_data, prediction_days)
+                predictions = model.predict_stock(stock_data, prediction_days, start_date)
                 
                 if predictions:
                     # 转换为PredictionPoint格式

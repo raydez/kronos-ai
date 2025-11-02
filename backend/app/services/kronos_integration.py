@@ -164,7 +164,7 @@ class KronosIntegration:
             return False
     
     def predict_stock(self, stock_data: List[Dict[str, Any]], 
-                      prediction_days: int = 5) -> Optional[List[Dict[str, Any]]]:
+                      prediction_days: int = 5, start_date: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
         """使用Kronos模型预测股票"""
         if not self.model_loaded or not self.predictor:
             logger.error("Kronos模型未加载或预测器未初始化")
@@ -180,12 +180,22 @@ class KronosIntegration:
             df['timestamps'] = pd.to_datetime(df['date'])
             
             # 创建未来时间戳
-            last_timestamp = df['timestamps'].iloc[-1]
-            future_timestamps = pd.date_range(
-                start=last_timestamp + pd.Timedelta(days=1),
-                periods=prediction_days,
-                freq='B'  # 工作日
-            )
+            if start_date:
+                # 使用用户指定的开始日期
+                start_timestamp = pd.to_datetime(start_date)
+                future_timestamps = pd.date_range(
+                    start=start_timestamp,
+                    periods=prediction_days,
+                    freq='B'  # 工作日
+                )
+            else:
+                # 默认从历史数据最后一个交易日的下一天开始
+                last_timestamp = df['timestamps'].iloc[-1]
+                future_timestamps = pd.date_range(
+                    start=last_timestamp + pd.Timedelta(days=1),
+                    periods=prediction_days,
+                    freq='B'  # 工作日
+                )
             
             # 转换为Series以支持.dt访问器
             x_timestamp_series = pd.Series(df['timestamps'].values, name='timestamps')

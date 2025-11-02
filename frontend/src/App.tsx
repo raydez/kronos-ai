@@ -15,6 +15,7 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [predictionData, setPredictionData] = useState<PredictionResponse | null>(null);
   const [historicalData, setHistoricalData] = useState<StockData[]>([]);
+  const [actualData, setActualData] = useState<StockData[]>([]); // 预测时间段的实际数据
 
 
   const handlePredict = async (request: PredictionRequest) => {
@@ -27,10 +28,17 @@ const App: React.FC = () => {
       if (historyResponse.success) {
         console.log('Historical data received:', historyResponse.data.history);
         // 处理日期格式
-        const processedHistory = historyResponse.data.history.map((item: any) => ({
+        let processedHistory = historyResponse.data.history.map((item: any) => ({
           ...item,
           date: item.date.split('T')[0] // 只保留日期部分
         }));
+        
+        // 如果有预测开始日期，只保留该日期之前的历史数据
+        if (request.start_date) {
+          processedHistory = processedHistory.filter((item: any) => item.date < request.start_date!);
+          console.log('Filtered historical data to dates before', request.start_date, ':', processedHistory.length, 'records');
+        }
+        
         console.log('Processed historical data:', processedHistory);
         setHistoricalData(processedHistory);
       }
@@ -50,6 +58,101 @@ const App: React.FC = () => {
         };
         console.log('Processed prediction data:', processedPredictionData);
         setPredictionData(processedPredictionData);
+
+        // 获取预测时间段的实际数据（用于对比）
+        if (processedPredictions.length > 0) {
+          const firstPredictionDate = processedPredictions[0].date;
+          
+          // 检查预测开始时间是否早于今天
+          const today = new Date().toISOString().split('T')[0];
+          
+          if (firstPredictionDate <= today) {
+            try {
+              console.log('🔍 获取实际数据用于对比...');
+              
+              // 计算需要获取的实际数据范围，确保有足够的交易日
+              const targetDays = request.prediction_days;
+              // 扩展结束日期，确保有足够的交易日（通常需要2-3倍的日历天数）
+              const extendedEndDate = new Date(firstPredictionDate);
+              extendedEndDate.setDate(extendedEndDate.getDate() + Math.ceil(targetDays * 2.5));
+              
+              const actualResponse = await StockAPI.getStockActualData(
+                request.code, 
+                firstPredictionDate, 
+                extendedEndDate.toISOString().split('T')[0]
+              );
+              
+              if (actualResponse.success && actualResponse.data.actual) {
+                const processedActual = actualResponse.data.actual.map((item: any) => ({
+                  ...item,
+                  date: item.date.split('T')[0] // 只保留日期部分
+                }));
+                
+                // 重新设计的对齐逻辑：只显示有预测和实际数据的交易日
+                let alignedActual: any[] = [];
+                let alignedPredictions: any[] = [];
+                
+                // 找出预测数据和实际数据中都存在的交易日
+                const actualDates = processedActual.map((actual: any) => actual.date);
+                const predictionDates = processedPredictions.map((prediction: any) => prediction.date);
+                
+                // 获取共同的交易日（既在预测中也在实际数据中）
+                const commonTradingDays = actualDates.filter((date: string) => 
+                  predictionDates.includes(date)
+                );
+                
+                if (commonTradingDays.length > 0) {
+                  // 使用共同的交易日作为对齐基准
+                  alignedActual = processedActual.filter((actual: any) => 
+                    commonTradingDays.includes(actual.date)
+                  );
+                  alignedPredictions = processedPredictions.filter((prediction: any) => 
+                    commonTradingDays.includes(prediction.date)
+                  );
+                  
+                  // 按日期排序
+                  alignedActual.sort((a, b) => a.date.localeCompare(b.date));
+                  alignedPredictions.sort((a, b) => a.date.localeCompare(b.date));
+                  
+                  console.log(`✅ 找到 ${commonTradingDays.length} 个共同交易日进行对比`);
+                } else {
+                  // 如果没有共同的交易日，显示所有可用的数据
+                  console.log('⚠️ 没有找到共同的交易日，显示所有可用数据');
+                  alignedActual = processedActual;
+                  alignedPredictions = processedPredictions.filter((prediction: any) => 
+                    actualDates.includes(prediction.date)
+                  );
+                }
+                
+                // 更新预测数据为交易日对齐的版本
+                const alignedPredictionData = {
+                  ...processedPredictionData,
+                  predictions: alignedPredictions
+                };
+                setPredictionData(alignedPredictionData);
+                setActualData(alignedActual);
+                
+                console.log('✅ 交易日对齐完成:');
+                console.log('  用户选择预测天数:', targetDays);
+                console.log('  原始预测天数:', processedPredictions.length);
+                console.log('  获取实际天数:', processedActual.length);
+                console.log('  可对比预测天数:', alignedPredictions.length);
+                console.log('  可对比实际天数:', alignedActual.length);
+                console.log('📅 可对比的交易日:', alignedActual.map(a => a.date));
+              } else {
+                console.log('⚠️ 没有找到实际数据');
+                setActualData([]);
+              }
+            } catch (error) {
+              console.warn('❌ 获取实际数据失败:', error);
+              setActualData([]);
+            }
+          } else {
+            console.log('🔮 预测日期在未来，无实际数据');
+            setActualData([]);
+          }
+        }
+
         message.success('预测完成！');
       } else {
         message.error('预测失败');
@@ -112,6 +215,7 @@ const App: React.FC = () => {
               title={`${predictionData.name} (${predictionData.code}) - 股价走势预测`}
               historicalData={historicalData}
               predictionData={predictionData.predictions}
+              actualData={actualData}
             />
           )}
 
