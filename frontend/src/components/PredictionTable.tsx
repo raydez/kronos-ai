@@ -152,7 +152,7 @@ const PredictionTable: React.FC<PredictionTableProps> = ({
               </Table.Summary.Cell>
               <Table.Summary.Cell index={4}>
                 <strong>
-                  平均: ¥{predictions.reduce((sum, p) => sum + p.close, 0) / predictions.length}
+                  平均: ¥{(predictions.reduce((sum, p) => sum + p.close, 0) / predictions.length).toFixed(2)}
                 </strong>
               </Table.Summary.Cell>
               <Table.Summary.Cell index={5}>

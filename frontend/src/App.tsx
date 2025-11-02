@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { Layout, Typography, message, Spin } from 'antd';
+import { Layout, Typography, message, Spin, Row, Col } from 'antd';
 import PredictionForm from './components/PredictionForm';
-import KLineChart from './components/KLineChart';
+import PlotlyKLineChart from './components/PlotlyKLineChart';
 import PredictionTable from './components/PredictionTable';
 import ModelStatus from './components/ModelStatus';
 import StockAPI from './services/api';
@@ -80,11 +80,15 @@ const App: React.FC = () => {
 
       <Content style={{ padding: '24px' }}>
         <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
-          {/* 模型状态 */}
-          <ModelStatus />
-
-          {/* 预测表单 */}
-          <PredictionForm onPredict={handlePredict} loading={loading} />
+          {/* 模型状态和预测表单在同一行 */}
+          <Row gutter={24} style={{ marginBottom: '6px' }}>
+            <Col xs={24} lg={8}>
+              <ModelStatus />
+            </Col>
+            <Col xs={24} lg={16}>
+              <PredictionForm onPredict={handlePredict} loading={loading} />
+            </Col>
+          </Row>
 
           {/* 加载状态 */}
           {loading && (
@@ -104,7 +108,7 @@ const App: React.FC = () => {
 
           {/* 图表展示 */}
           {predictionData && !loading && (
-            <KLineChart
+            <PlotlyKLineChart
               title={`${predictionData.name} (${predictionData.code}) - 股价走势预测`}
               historicalData={historicalData}
               predictionData={predictionData.predictions}

@@ -148,23 +148,27 @@ class StockService:
                 frequency="d"  # 日线数据
             )
             
+            if rs is None:
+                logger.warning(f"Baostock查询返回None，使用备用数据")
+                return self._generate_fallback_data(code, days)
+                
             data_list = rs.get_data()
             
             # 登出
             bs.logout()
             
-            if not data_list.empty:
+            if data_list is not None and not data_list.empty:
                 # 转换为需要的格式
                 data = []
                 for _, row in data_list.tail(days).iterrows():  # 只取最近的数据
                     try:
                         data.append({
-                            "date": pd.to_datetime(row['date']),
+                            "date": row['date'],  # 保持字符串格式
                             "open": float(row['open']),
                             "high": float(row['high']),
                             "low": float(row['low']),
                             "close": float(row['close']),
-                            "volume": int(row['volume']) if pd.notna(row['volume']) else 0
+                            "volume": int(float(row['volume'])) if str(row['volume']).strip() and str(row['volume']) != 'nan' else 0
                         })
                     except (ValueError, TypeError) as e:
                         logger.warning(f"跳过无效数据行: {e}")
@@ -183,6 +187,71 @@ class StockService:
         except Exception as e:
             logger.error(f"从Baostock获取股票 {code} 历史数据失败: {e}")
             return self._generate_fallback_data(code, days)
+    
+    async def _fetch_stock_data_for_date_range(self, code: str, start_date: str, end_date: str) -> List[Dict[str, Any]]:
+        """从Baostock获取指定日期范围的股票数据"""
+        try:
+            import baostock as bs
+            
+            # 登录Baostock
+            lg = bs.login()
+            if lg.error_code != '0':
+                logger.warning(f"Baostock登录失败: {lg.error_msg}")
+                return []
+            
+            # 构建股票代码
+            market_prefix = "sh." if code.startswith("6") else "sz."
+            full_code = market_prefix + code
+            
+            # 查询指定日期范围的历史数据
+            rs = bs.query_history_k_data_plus(
+                full_code,
+                "date,open,high,low,close,volume,amount",
+                start_date=start_date,
+                end_date=end_date,
+                frequency="d"  # 日线数据
+            )
+            
+            if rs is None:
+                logger.warning(f"Baostock查询返回None")
+                bs.logout()
+                return []
+                
+            data_list = rs.get_data()
+            
+            # 登出
+            bs.logout()
+            
+            if data_list is not None and not data_list.empty:
+                # 转换为需要的格式
+                data = []
+                for _, row in data_list.iterrows():
+                    try:
+                        data.append({
+                            "date": row['date'],  # 保持字符串格式
+                            "open": float(row['open']),
+                            "high": float(row['high']),
+                            "low": float(row['low']),
+                            "close": float(row['close']),
+                            "volume": int(float(row['volume'])) if str(row['volume']).strip() and str(row['volume']) != 'nan' else 0
+                        })
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"跳过无效数据行: {e}")
+                        continue
+                
+                if data:
+                    logger.info(f"成功从Baostock获取 {len(data)} 条记录用于 {code} ({start_date} 到 {end_date})")
+                    return data
+            
+            logger.warning(f"未从Baostock获取到 {code} 的日期范围数据 ({start_date} 到 {end_date})")
+            return []
+            
+        except ImportError:
+            logger.warning("Baostock未安装")
+            return []
+        except Exception as e:
+            logger.error(f"从Baostock获取股票 {code} 日期范围数据失败: {e}")
+            return []
     
     def _generate_fallback_data(self, code: str, days: int) -> List[Dict[str, Any]]:
         """生成备用数据"""
@@ -236,22 +305,9 @@ class StockService:
     async def get_stock_data_for_dates(self, code: str, start_date: str, end_date: str) -> List[Dict[str, Any]]:
         """获取指定日期范围内的股票数据（用于对比预测和实际数据）"""
         try:
-            # 计算日期范围
-            start = datetime.strptime(start_date, '%Y-%m-%d')
-            end = datetime.strptime(end_date, '%Y-%m-%d')
-            days = (end - start).days + 1
-            
-            # 获取该时间范围的数据
-            data = await self._fetch_stock_data_from_baostock(code, days)
-            
-            # 过滤日期范围
-            filtered_data = []
-            for item in data:
-                item_date = datetime.strptime(item['date'], '%Y-%m-%d')
-                if start <= item_date <= end:
-                    filtered_data.append(item)
-            
-            return filtered_data
+            # 直接获取指定日期范围的数据
+            data = await self._fetch_stock_data_for_date_range(code, start_date, end_date)
+            return data
             
         except Exception as e:
             logger.error(f"获取股票 {code} 日期范围 {start_date} 到 {end_date} 的数据失败: {e}")

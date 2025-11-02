@@ -92,7 +92,7 @@ async def predict_stock(request: PredictionRequest):
             raise HTTPException(status_code=400, detail="无效的股票代码")
         
         # 进行预测
-        result = await prediction_service.predict_stock(request.code, request.prediction_days)
+        result = await prediction_service.predict_stock(request.code, request.prediction_days, request.start_date)
         
         if not result:
             raise HTTPException(status_code=500, detail="预测失败")

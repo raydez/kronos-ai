@@ -38,6 +38,7 @@ export interface APIResponse<T = any> {
 export interface PredictionRequest {
   code: string;
   prediction_days: number;
+  start_date?: string;
 }
 
 // 预测响应类型定义

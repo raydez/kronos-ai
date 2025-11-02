@@ -6,6 +6,8 @@ __pycache__/
 # C extensions
 *.so
 
+Kronos/
+
 # Distribution / packaging
 .Python
 build/
@@ -109,8 +111,6 @@ venv/
 ENV/
 env.bak/
 venv.bak/
-
-Kronos/
 
 # Spyder project settings
 .spyderproject

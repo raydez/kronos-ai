@@ -106,10 +106,9 @@ const KLineChart: React.FC<KLineChartProps> = ({
       const predictionDates = predictionData.map(item => item.date);
       const actualDates = actualData.map(item => item.date);
 
-      // 合并所有日期用于X轴
+      // 分别处理各段数据的日期
       const allDates = [...historicalDates, ...predictionDates];
       if (showActual && actualDates.length > 0) {
-        // 确保实际数据日期与预测数据日期对齐
         allDates.push(...actualDates);
       }
 
@@ -136,26 +135,59 @@ const KLineChart: React.FC<KLineChartProps> = ({
         }
       });
 
-      // 2. 预测数据线图（避免K线图的null值问题）
+      // 2. 预测数据 - 使用多个线图模拟K线效果
       if (predictionValues.length > 0) {
-        // 使用收盘价作为预测线图数据
-        const predictionClosePrices = predictionValues.map(item => item[1]);
-        const alignedPredictionData = new Array(historicalDates.length).fill(null).concat(predictionClosePrices);
+        const startIndex = historicalDates.length;
         
+        // 预测开盘价线
+        const predictionOpenData = new Array(startIndex).fill(null).concat(predictionValues.map(item => item[0]));
+        series.push({
+          name: '预测开盘价',
+          type: 'line',
+          data: predictionOpenData,
+          itemStyle: { color: '#81C784' },
+          lineStyle: { color: '#81C784', width: 1, type: 'dashed' },
+          symbol: 'circle',
+          symbolSize: 3,
+          connectNulls: false
+        });
+        
+        // 预测收盘价线
+        const predictionCloseData = new Array(startIndex).fill(null).concat(predictionValues.map(item => item[1]));
         series.push({
           name: '预测收盘价',
           type: 'line',
-          data: alignedPredictionData,
-          itemStyle: {
-            color: '#66BB6A'
-          },
-          lineStyle: {
-            color: '#66BB6A',
-            type: 'dashed',
-            width: 2
-          },
+          data: predictionCloseData,
+          itemStyle: { color: '#66BB6A' },
+          lineStyle: { color: '#66BB6A', width: 2 },
           symbol: 'circle',
           symbolSize: 4,
+          connectNulls: false
+        });
+        
+        // 预测最高价线
+        const predictionHighData = new Array(startIndex).fill(null).concat(predictionValues.map(item => item[3]));
+        series.push({
+          name: '预测最高价',
+          type: 'line',
+          data: predictionHighData,
+          itemStyle: { color: '#A5D6A7' },
+          lineStyle: { color: '#A5D6A7', width: 1, type: 'dotted' },
+          symbol: 'triangle',
+          symbolSize: 3,
+          connectNulls: false
+        });
+        
+        // 预测最低价线
+        const predictionLowData = new Array(startIndex).fill(null).concat(predictionValues.map(item => item[2]));
+        series.push({
+          name: '预测最低价',
+          type: 'line',
+          data: predictionLowData,
+          itemStyle: { color: '#C8E6C9' },
+          lineStyle: { color: '#C8E6C9', width: 1, type: 'dotted' },
+          symbol: 'triangle',
+          symbolSize: 3,
           connectNulls: false
         });
       }
@@ -203,17 +235,21 @@ const KLineChart: React.FC<KLineChartProps> = ({
               if (param.data && param.data !== null) {
                 const data = param.data;
                 result += `${param.marker}${param.seriesName}<br/>`;
-                result += `开盘: ${data[0]}<br/>`;
-                result += `收盘: ${data[1]}<br/>`;
-                result += `最低: ${data[2]}<br/>`;
-                result += `最高: ${data[3]}<br/><br/>`;
+                if (param.seriesType === 'candlestick') {
+                  result += `开盘: ${data[0]}<br/>`;
+                  result += `收盘: ${data[1]}<br/>`;
+                  result += `最低: ${data[2]}<br/>`;
+                  result += `最高: ${data[3]}<br/><br/>`;
+                } else if (param.seriesType === 'line') {
+                  result += `价格: ${data}<br/><br/>`;
+                }
               }
             });
             return result;
           }
         },
         legend: {
-          data: ['历史数据', '预测收盘价', ...(showActual ? ['实际收盘价'] : [])],
+          data: ['历史数据', '预测开盘价', '预测收盘价', '预测最高价', '预测最低价', ...(showActual ? ['实际收盘价'] : [])],
           top: 30
         },
         grid: {

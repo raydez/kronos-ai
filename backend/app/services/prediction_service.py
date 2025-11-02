@@ -19,19 +19,11 @@ class PredictionService:
     """预测服务"""
     
     def __init__(self):
-        self.prediction_cache = {}
-        self.cache_ttl = 3600  # 缓存1小时
+        pass
     
-    async def predict_stock(self, code: str, prediction_days: int = 5) -> Optional[PredictionResponse]:
+    async def predict_stock(self, code: str, prediction_days: int = 5, start_date: Optional[str] = None) -> Optional[PredictionResponse]:
         """预测股票走势"""
         try:
-            # 检查缓存
-            cache_key = f"{code}_{prediction_days}"
-            if cache_key in self.prediction_cache:
-                cached_data, timestamp = self.prediction_cache[cache_key]
-                if datetime.now().timestamp() - timestamp < self.cache_ttl:
-                    logger.info(f"使用缓存预测结果为 {code}")
-                    return cached_data
             
             # 获取股票信息
             stock_info = await stock_service.get_stock_info(code)
@@ -44,7 +36,7 @@ class PredictionService:
                 raise ValueError(f"股票 {code} 的历史数据不足")
             
             # 使用Kronos模型进行预测
-            predictions = await self._predict_with_kronos(stock_data, prediction_days)
+            predictions = await self._predict_with_kronos(stock_data, prediction_days, code)
             
             # 构建响应
             model_info = ModelInfo(**model_manager.get_model_info())
@@ -56,16 +48,13 @@ class PredictionService:
                 model_info=model_info
             )
             
-            # 缓存结果
-            self.prediction_cache[cache_key] = (response, datetime.now().timestamp())
-            
             return response
             
         except Exception as e:
             logger.error(f"预测股票 {code} 失败: {e}")
             raise
     
-    async def _predict_with_kronos(self, stock_data: List[Dict[str, Any]], prediction_days: int) -> List[PredictionPoint]:
+    async def _predict_with_kronos(self, stock_data: List[Dict[str, Any]], prediction_days: int, code: str) -> List[PredictionPoint]:
         """使用Kronos模型进行预测"""
         try:
             # 获取模型使用权
@@ -94,14 +83,14 @@ class PredictionService:
                         ))
                     return prediction_points
                 else:
-                    # 如果模型预测失败，返回None
+                    # 如果模型预测失败，返回空列表
                     logger.error(f"Kronos模型预测股票 {code} 返回空结果")
-                    return None
+                    return []
                 
         except Exception as e:
             logger.error(f"使用Kronos模型预测股票 {code} 失败: {e}")
-            # 如果模型预测失败，返回None
-            return None
+            # 如果模型预测失败，返回空列表
+            return []
     
     def _prepare_input_data(self, stock_data: List[Dict[str, Any]]) -> np.ndarray:
         """准备模型输入数据"""
@@ -165,10 +154,7 @@ class PredictionService:
         
         return batch_results
     
-    def clear_cache(self):
-        """清空预测缓存"""
-        self.prediction_cache.clear()
-        logger.info("预测缓存已清空")
+
 
 
 # 全局预测服务实例

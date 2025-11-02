@@ -1,7 +1,8 @@
 import React from 'react';
-import { Form, Input, Select, Button, Card, message, Space } from 'antd';
+import { Form, Input, Select, Button, Card, message, Space, DatePicker } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import { PredictionRequest } from '../types';
+import dayjs from 'dayjs';
 
 const { Option } = Select;
 
@@ -14,7 +15,7 @@ const PredictionForm: React.FC<PredictionFormProps> = ({ onPredict, loading = fa
   const [form] = Form.useForm();
 
   const handleSubmit = (values: any) => {
-    const { code, predictionDays } = values;
+    const { code, predictionDays, startDate } = values;
     
     // 验证股票代码格式
     if (!/^\d{6}$/.test(code)) {
@@ -24,7 +25,8 @@ const PredictionForm: React.FC<PredictionFormProps> = ({ onPredict, loading = fa
 
     onPredict({
       code: code.trim(),
-      prediction_days: predictionDays
+      prediction_days: predictionDays,
+      start_date: startDate ? startDate.format('YYYY-MM-DD') : undefined
     });
   };
 
@@ -37,7 +39,8 @@ const PredictionForm: React.FC<PredictionFormProps> = ({ onPredict, loading = fa
         layout="inline"
         onFinish={handleSubmit}
         initialValues={{
-          predictionDays: 5
+          predictionDays: 5,
+          startDate: dayjs()
         }}
       >
         <Form.Item
@@ -51,6 +54,21 @@ const PredictionForm: React.FC<PredictionFormProps> = ({ onPredict, loading = fa
             placeholder="请输入6位股票代码"
             style={{ width: 200 }}
             maxLength={6}
+          />
+        </Form.Item>
+
+        <Form.Item
+          name="startDate"
+          label="开始预测日期"
+        >
+          <DatePicker 
+            style={{ width: 150 }} 
+            format="YYYY-MM-DD"
+            placeholder="选择开始日期"
+            disabledDate={(current) => {
+              // 禁用未来日期
+              return current && current > dayjs().endOf('day');
+            }}
           />
         </Form.Item>
 

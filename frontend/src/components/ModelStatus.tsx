@@ -112,7 +112,6 @@ const ModelStatus: React.FC<ModelStatusProps> = ({ onModelUpdate }) => {
         </Button>
       }
       loading={loading}
-      style={{ marginBottom: 24 }}
     >
       {modelInfo && (
         <Row gutter={16}>
