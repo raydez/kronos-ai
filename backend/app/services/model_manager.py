@@ -35,29 +35,30 @@ class ModelManager:
     def _load_model(self):
         """加载Kronos模型"""
         try:
-            logger.info("Loading Kronos model...")
+            logger.info("加载Kronos模型...")
             
             # 尝试加载真实的Kronos模型
             if kronos_integration.is_available():
                 success = kronos_integration.load_model("kronos-small")
                 if success:
-                    logger.info("Kronos model loaded successfully")
+                    logger.info("Kronos模型加载成功")
                     return
                 else:
-                    logger.warning("Failed to load Kronos model, will use fallback")
+                    logger.warning("Kronos模型加载失败")
             else:
-                logger.warning("Kronos not available, will use simulated predictions")
+                logger.warning("Kronos模型不可用")
             
         except Exception as e:
-            logger.error(f"Failed to load Kronos model: {e}")
+            logger.error(f"加载Kronos模型失败: {e}")
     
     @asynccontextmanager
     async def get_model(self):
         """获取模型使用权（异步上下文管理器）"""
         async with self._model_lock:
             if not kronos_integration.model_loaded:
-                # 如果真实模型未加载，仍然允许使用模拟预测
-                logger.warning("Using simulated predictions - real model not loaded")
+                # 如果真实模型未加载，返回错误信息
+                logger.error("Kronos模型不可用或未加载")
+                raise RuntimeError("Kronos模型不可用或未加载")
             yield kronos_integration
     
     def get_model_info(self):
@@ -66,7 +67,7 @@ class ModelManager:
     
     def reload_model(self):
         """重新加载模型"""
-        logger.info("Reloading Kronos model...")
+        logger.info("重新加载Kronos模型...")
         kronos_integration.unload_model()
         self._load_model()
     
@@ -77,16 +78,16 @@ class ModelManager:
     def switch_model(self, model_name: str) -> bool:
         """切换模型"""
         try:
-            logger.info(f"Switching to model: {model_name}")
+            logger.info(f"切换到模型: {model_name}")
             kronos_integration.unload_model()
             success = kronos_integration.load_model(model_name)
             if success:
-                logger.info(f"Successfully switched to {model_name}")
+                logger.info(f"切换到模型 {model_name} 成功")
             else:
-                logger.error(f"Failed to switch to {model_name}")
+                logger.error(f"切换到模型 {model_name} 失败")
             return success
         except Exception as e:
-            logger.error(f"Error switching model: {e}")
+            logger.error(f"切换模型时出错: {e}")
             return False
 
 

@@ -17,40 +17,36 @@ from huggingface_hub import PyTorchModelHubMixin
 os.environ['CUDA_VISIBLE_DEVICES'] = ''
 torch.cuda.is_available = lambda: False
 
-# 添加Kronos模块路径
-kronos_path = Path(__file__).parent.parent.parent.parent / "Kronos"
-if kronos_path.exists():
-    sys.path.insert(0, str(kronos_path))
+# 添加model模块路径
+model_path = Path(__file__).parent.parent.parent  # 指向backend目录
+sys.path.insert(0, str(model_path))
 
 try:
-    # 添加Kronos路径到系统路径
-    sys.path.insert(0, str(kronos_path))
-    
     # 导入Kronos模块
     from model.kronos import Kronos, KronosTokenizer, KronosPredictor
     
     KRONOS_AVAILABLE = True
-    logging.info("Kronos model modules loaded successfully")
+    logging.info("Kronos模型模块加载成功")
 except Exception as e:
     KRONOS_AVAILABLE = False
-    logging.warning(f"Kronos model not available: {e}")
+    logging.warning(f"Kronos模型不可用: {e}")
     
     # 创建虚拟类以避免NameError
     class Kronos:
         @classmethod
         def from_pretrained(cls, *args, **kwargs):
-            raise ImportError("Kronos model not available")
+            raise ImportError("Kronos模型不可用")
     
     class KronosTokenizer:
         @classmethod
         def from_pretrained(cls, *args, **kwargs):
-            raise ImportError("KronosTokenizer not available")
+            raise ImportError("KronosTokenizer不可用")
     
     class KronosPredictor:
         def __init__(self, *args, **kwargs):
-            raise ImportError("KronosPredictor not available")
+            raise ImportError("KronosPredictor不可用")
         def predict(self, *args, **kwargs):
-            raise ImportError("KronosPredictor not available")
+            raise ImportError("KronosPredictor不可用")
 
 logger = logging.getLogger(__name__)
 
@@ -100,19 +96,20 @@ class KronosIntegration:
     def load_model(self, model_name: str = "kronos-small") -> bool:
         """加载Kronos模型"""
         if not KRONOS_AVAILABLE:
-            logger.warning("Kronos not available, cannot load model")
+            logger.warning("Kronos模型不可用，无法加载模型")
             return False
         
         try:
             if model_name not in self.model_configs:
-                logger.error(f"Unknown model: {model_name}")
+                logger.error(f"未知模型: {model_name}")
                 return False
             
             config = self.model_configs[model_name]
-            logger.info(f"Loading {config['name']} model...")
+            logger.info(f"加载 {config['name']} 模型...")
             
             # 检查本地缓存路径
             cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+            logger.info(f"检查缓存目录: {cache_dir}")
             
             # 构建本地路径
             tokenizer_local_path = None
@@ -125,7 +122,7 @@ class KronosIntegration:
                 snapshots = list(tokenizer_cache.glob("snapshots/*"))
                 if snapshots:
                     tokenizer_local_path = snapshots[0]
-                    logger.info(f"Found local tokenizer at: {tokenizer_local_path}")
+                    logger.info(f"找到本地Tokenizer: {tokenizer_local_path}")
             
             # 查找模型本地路径
             model_pattern = f"models--{config['model_id'].replace('/', '--')}"
@@ -134,22 +131,22 @@ class KronosIntegration:
                 snapshots = list(model_cache.glob("snapshots/*"))
                 if snapshots:
                     model_local_path = snapshots[0]
-                    logger.info(f"Found local model at: {model_local_path}")
+                    logger.info(f"找到本地模型: {model_local_path}")
             
             # 加载tokenizer
             if tokenizer_local_path and tokenizer_local_path.exists():
-                logger.info(f"Loading tokenizer from local cache: {tokenizer_local_path}")
+                logger.info(f"从本地缓存加载Tokenizer: {tokenizer_local_path}")
                 self.tokenizer = KronosTokenizer.from_pretrained(str(tokenizer_local_path))
             else:
-                logger.info(f"Loading tokenizer from HuggingFace: {config['tokenizer_id']}")
+                logger.info(f"从HuggingFace加载Tokenizer: {config['tokenizer_id']}")
                 self.tokenizer = KronosTokenizer.from_pretrained(config['tokenizer_id'])
             
             # 加载模型（强制使用CPU）
             if model_local_path and model_local_path.exists():
-                logger.info(f"Loading model from local cache: {model_local_path}")
+                logger.info(f"从本地缓存加载模型: {model_local_path}")
                 self.model = Kronos.from_pretrained(str(model_local_path))
             else:
-                logger.info(f"Loading model from HuggingFace: {config['model_id']}")
+                logger.info(f"从HuggingFace加载模型: {config['model_id']}")
                 self.model = Kronos.from_pretrained(config['model_id'])
             
             # 创建预测器（使用CPU设备）
@@ -158,11 +155,11 @@ class KronosIntegration:
             self.current_model = model_name
             self.model_loaded = True
             
-            logger.info(f"Successfully loaded {config['name']} model on CPU")
+            logger.info(f"成功加载 {config['name']} 模型在CPU上")
             return True
             
         except Exception as e:
-            logger.error(f"Failed to load Kronos model: {e}")
+            logger.error(f"加载Kronos模型失败: {e}")
             self.model_loaded = False
             return False
     
@@ -170,7 +167,7 @@ class KronosIntegration:
                       prediction_days: int = 5) -> Optional[List[Dict[str, Any]]]:
         """使用Kronos模型预测股票"""
         if not self.model_loaded or not self.predictor:
-            logger.error("Model not loaded")
+            logger.error("Kronos模型未加载或预测器未初始化")
             return None
         
         try:
@@ -226,7 +223,7 @@ class KronosIntegration:
             return result
             
         except Exception as e:
-            logger.error(f"Prediction failed: {e}")
+            logger.error(f"Kronos模型预测失败: {e}")
             return None
     
     def _prepare_stock_sequence(self, stock_data: List[Dict[str, Any]]) -> str:
@@ -255,7 +252,7 @@ class KronosIntegration:
             return sequence
             
         except Exception as e:
-            logger.error(f"Failed to prepare sequence: {e}")
+            logger.error(f"准备股票序列失败: {e}")
             raise
     
     def _parse_predictions(self, predictions: torch.Tensor, 
@@ -332,7 +329,7 @@ class KronosIntegration:
             return result
             
         except Exception as e:
-            logger.error(f"Failed to parse predictions: {e}")
+            logger.error(f"解析Kronos模型预测结果失败: {e}")
             raise
     
     def get_model_info(self) -> Dict[str, Any]:
@@ -389,7 +386,7 @@ class KronosIntegration:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         
-        logger.info("Model unloaded")
+        logger.info("Kronos模型已卸载")
 
 
 # 全局Kronos集成实例

@@ -28,7 +28,7 @@ class StockService:
             stock_info = await self._fetch_stock_info_from_baostock(code)
             return stock_info
         except Exception as e:
-            logger.error(f"Failed to get stock info for {code}: {e}")
+            logger.error(f"获取股票 {code} 基本信息失败: {e}")
             return None
     
     async def get_stock_data(self, code: str, days: int = 30) -> Optional[List[Dict[str, Any]]]:
@@ -37,7 +37,7 @@ class StockService:
             # 先检查缓存
             cache_key = f"{code}_{days}"
             if cache_key in self._cache:
-                logger.info(f"Using cached data for {code}")
+                logger.info(f"使用缓存数据 {code}")
                 return self._cache[cache_key]
             
             # 从Baostock获取数据
@@ -50,7 +50,7 @@ class StockService:
             
             return None
         except Exception as e:
-            logger.error(f"Failed to get stock data for {code}: {e}")
+            logger.error(f"获取股票 {code} 历史数据失败: {e}")
             return None
     
     async def _fetch_stock_info_from_baostock(self, code: str) -> Dict[str, Any]:
@@ -61,7 +61,7 @@ class StockService:
             # 登录Baostock
             lg = bs.login()
             if lg.error_code != '0':
-                logger.warning(f"Baostock login failed: {lg.error_msg}")
+                logger.warning(f"Baostock登录失败: {lg.error_msg}")
                 return self._get_fallback_stock_info(code)
             
             # 查询股票基本信息
@@ -84,14 +84,14 @@ class StockService:
                     "type": stock_info.get('type', '')
                 }
             else:
-                logger.warning(f"No stock info found for {code}")
+                logger.warning(f"未找到股票 {code} 的基本信息")
                 return self._get_fallback_stock_info(code)
                 
         except ImportError:
-            logger.warning("Baostock not installed, using fallback data")
+            logger.warning("Baostock未安装，使用备用数据")
             return self._get_fallback_stock_info(code)
         except Exception as e:
-            logger.error(f"Error fetching stock info from Baostock: {e}")
+            logger.error(f"从Baostock获取股票 {code} 基本信息失败: {e}")
             return self._get_fallback_stock_info(code)
     
     def _get_fallback_stock_info(self, code: str) -> Dict[str, Any]:
@@ -128,7 +128,7 @@ class StockService:
             # 登录Baostock
             lg = bs.login()
             if lg.error_code != '0':
-                logger.warning(f"Baostock login failed: {lg.error_msg}")
+                logger.warning(f"Baostock登录失败: {lg.error_msg}")
                 return self._generate_fallback_data(code, days)
             
             # 计算日期范围
@@ -167,26 +167,26 @@ class StockService:
                             "volume": int(row['volume']) if pd.notna(row['volume']) else 0
                         })
                     except (ValueError, TypeError) as e:
-                        logger.warning(f"Skipping invalid data row: {e}")
+                        logger.warning(f"跳过无效数据行: {e}")
                         continue
                 
                 if data:
-                    logger.info(f"Successfully fetched {len(data)} records for {code}")
+                    logger.info(f"成功从Baostock获取 {len(data)} 条记录用于 {code}")
                     return data
             
-            logger.warning(f"No data found for {code}, using fallback")
+            logger.warning(f"未从Baostock获取到 {code} 的历史数据，使用备用数据")
             return self._generate_fallback_data(code, days)
             
         except ImportError:
-            logger.warning("Baostock not installed, using fallback data")
+            logger.warning("Baostock未安装，使用备用数据")
             return self._generate_fallback_data(code, days)
         except Exception as e:
-            logger.error(f"Error fetching stock data from Baostock: {e}")
+            logger.error(f"从Baostock获取股票 {code} 历史数据失败: {e}")
             return self._generate_fallback_data(code, days)
     
     def _generate_fallback_data(self, code: str, days: int) -> List[Dict[str, Any]]:
         """生成备用数据"""
-        logger.info(f"Generating fallback data for {code}")
+        logger.info(f"为 {code} 生成 {days} 天的备用数据")
         
         # 生成模拟数据
         end_date = datetime.now()
@@ -254,7 +254,7 @@ class StockService:
             return filtered_data
             
         except Exception as e:
-            logger.error(f"Failed to get stock data for dates {start_date} to {end_date}: {e}")
+            logger.error(f"获取股票 {code} 日期范围 {start_date} 到 {end_date} 的数据失败: {e}")
             # 返回空列表而不是fallback数据，因为这是用于对比的
             return []
     
@@ -285,7 +285,7 @@ class StockService:
     def clear_cache(self):
         """清空缓存"""
         self._cache.clear()
-        logger.info("Stock data cache cleared")
+        logger.info("股票数据缓存已清空")
 
 
 # 全局股票服务实例

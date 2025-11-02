@@ -30,7 +30,7 @@ class PredictionService:
             if cache_key in self.prediction_cache:
                 cached_data, timestamp = self.prediction_cache[cache_key]
                 if datetime.now().timestamp() - timestamp < self.cache_ttl:
-                    logger.info(f"Using cached prediction for {code}")
+                    logger.info(f"使用缓存预测结果为 {code}")
                     return cached_data
             
             # 获取股票信息
@@ -62,7 +62,7 @@ class PredictionService:
             return response
             
         except Exception as e:
-            logger.error(f"Failed to predict stock {code}: {e}")
+            logger.error(f"预测股票 {code} 失败: {e}")
             raise
     
     async def _predict_with_kronos(self, stock_data: List[Dict[str, Any]], prediction_days: int) -> List[PredictionPoint]:
@@ -94,13 +94,14 @@ class PredictionService:
                         ))
                     return prediction_points
                 else:
-                    # 如果模型预测失败，使用模拟数据
-                    return self._simulate_predictions(stock_data, prediction_days)
+                    # 如果模型预测失败，返回None
+                    logger.error(f"Kronos模型预测股票 {code} 返回空结果")
+                    return None
                 
         except Exception as e:
-            logger.error(f"Failed to predict with Kronos: {e}")
-            # 如果模型预测失败，使用模拟数据
-            return self._simulate_predictions(stock_data, prediction_days)
+            logger.error(f"使用Kronos模型预测股票 {code} 失败: {e}")
+            # 如果模型预测失败，返回None
+            return None
     
     def _prepare_input_data(self, stock_data: List[Dict[str, Any]]) -> np.ndarray:
         """准备模型输入数据"""
@@ -136,50 +137,7 @@ class PredictionService:
         
         return np.array(features)
     
-    def _simulate_predictions(self, stock_data: List[Dict[str, Any]], prediction_days: int) -> List[PredictionPoint]:
-        """模拟预测结果（用于开发测试）"""
-        predictions = []
-        
-        # 获取最后一个交易日的数据
-        last_data = stock_data[-1]
-        last_close = last_data['close']
-        
-        # 生成预测日期
-        current_date = datetime.now()
-        if current_date.weekday() >= 5:  # 周末
-            current_date += timedelta(days=(7 - current_date.weekday()))
-        
-        for i in range(prediction_days):
-            # 跳过周末
-            while current_date.weekday() >= 5:
-                current_date += timedelta(days=1)
-            
-            # 模拟价格预测（基于历史波动）
-            base_change = np.random.normal(0, 0.02)  # 2%的标准差
-            trend = i * 0.001  # 轻微趋势
-            
-            open_price = last_close * (1 + base_change + trend)
-            close_price = open_price * (1 + np.random.normal(0, 0.01))
-            high_price = max(open_price, close_price) * (1 + abs(np.random.normal(0, 0.005)))
-            low_price = min(open_price, close_price) * (1 - abs(np.random.normal(0, 0.005)))
-            
-            # 置信度随预测天数递减
-            confidence = max(0.6, 0.9 - i * 0.05)
-            
-            prediction = PredictionPoint(
-                date=current_date.strftime('%Y-%m-%d'),
-                open=round(open_price, 2),
-                high=round(high_price, 2),
-                low=round(low_price, 2),
-                close=round(close_price, 2),
-                confidence=round(confidence, 2)
-            )
-            
-            predictions.append(prediction)
-            last_close = close_price
-            current_date += timedelta(days=1)
-        
-        return predictions
+
     
     async def batch_predict(self, codes: List[str], prediction_days: int = 5) -> List[Dict[str, Any]]:
         """批量预测"""
@@ -210,7 +168,7 @@ class PredictionService:
     def clear_cache(self):
         """清空预测缓存"""
         self.prediction_cache.clear()
-        logger.info("Prediction cache cleared")
+        logger.info("预测缓存已清空")
 
 
 # 全局预测服务实例

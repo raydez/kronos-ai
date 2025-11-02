@@ -183,6 +183,23 @@ async def get_stock_actual_data(code: str, start_date: str, end_date: str):
         raise HTTPException(status_code=500, detail=f"获取实际股票数据失败: {str(e)}")
 
 
+@app.get("/model/info")
+async def get_model_info():
+    """获取模型信息"""
+    try:
+        model_info = model_manager.get_model_info()
+        
+        return APIResponse(
+            success=True,
+            data=model_info,
+            message="获取模型信息成功"
+        )
+        
+    except Exception as e:
+        logger.error(f"Get model info error: {e}")
+        raise HTTPException(status_code=500, detail=f"获取模型信息失败: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
