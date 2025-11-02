@@ -27,7 +27,8 @@ class Config:
     REDIS_URL = "redis://localhost:6379"  # 可选
     
     # 日志配置
-    LOG_DIR = "./data/logs"
+    LOG_FILE = "./data/logs/app.log"
+    LOG_LEVEL = "INFO"
     
     # 预测配置
     DEFAULT_PREDICTION_DAYS = 5

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Layout, Typography, message, Spin } from 'antd';
 import PredictionForm from './components/PredictionForm';
-import KLineChartAdvanced from './components/KLineChartAdvanced';
+import KLineChart from './components/KLineChart';
 import PredictionTable from './components/PredictionTable';
 import ModelStatus from './components/ModelStatus';
 import StockAPI from './services/api';
@@ -104,7 +104,7 @@ const App: React.FC = () => {
 
           {/* 图表展示 */}
           {predictionData && !loading && (
-            <KLineChartAdvanced
+            <KLineChart
               title={`${predictionData.name} (${predictionData.code}) - 股价走势预测`}
               historicalData={historicalData}
               predictionData={predictionData.predictions}
