@@ -82,7 +82,7 @@ kronos-ai/
 
 ### 环境要求
 
-- Python 3.8+
+- Python 3.11+
 - Node.js 14+ (可选，用于前端开发)
 - macOS/Linux/Windows
 
@@ -90,7 +90,7 @@ kronos-ai/
 
 1. **克隆项目**
 ```bash
-git clone <repository-url>
+git clone https://github.com/raydez/kronos-ai.git
 cd kronos-ai
 ```
 
@@ -347,13 +347,6 @@ docker build -t kronos-ai .
 # 运行容器
 docker run -p 8000:8000 kronos-ai
 ```
-
-### 生产环境部署
-
-1. 使用Gunicorn作为WSGI服务器
-2. 配置Nginx反向代理
-3. 设置SSL证书
-4. 配置监控和日志
 
 ## 🤝 贡献指南
 

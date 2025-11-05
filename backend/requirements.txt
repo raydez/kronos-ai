@@ -8,54 +8,18 @@ numpy==1.25.2
 
 # 数据源
 baostock==0.8.8
-tushare==1.2.89
-akshare==1.11.73
-
-# 数据库
-sqlalchemy==2.0.23
-aiosqlite==0.19.0
-
-# 缓存
-redis==5.0.1
-aioredis==2.0.1
-
-# HTTP客户端
-httpx==0.25.2
-aiohttp==3.9.1
-
-# 跨域支持
-python-multipart==0.0.6
-python-cors==1.7.0
-
-# 日志
-loguru==0.7.2
-
-# 时间处理
-python-dateutil==2.8.2
-
-# 异步支持
-asyncio==3.4.3
-
-# 环境变量
-python-dotenv==1.0.0
-
-# JSON处理
-orjson==3.9.10
 
 # 验证
 pydantic==2.5.0
-pydantic-settings==2.1.0
 
-# Kronos模型依赖（从Kronos项目复制）
+# Kronos模型依赖
 torch>=2.0.0
 transformers>=4.30.0
 huggingface-hub>=0.17.0
-
-# 可视化（如果需要后端生成图表）
-plotly==5.17.0
+einops>=0.7.0
+tqdm>=4.66.0
 
 # 开发工具
 pytest==7.4.3
 pytest-asyncio==0.21.1
 black==23.11.0
-flake8==6.1.0

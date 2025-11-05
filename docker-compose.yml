@@ -29,35 +29,18 @@ services:
       dockerfile: Dockerfile
     container_name: kronos-frontend
     ports:
-      - "3000:80"
+      - "3000:3000"
     depends_on:
       - backend
     networks:
       - kronos-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
       interval: 30s
       timeout: 10s
       retries: 3
 
-  # 可选：Redis缓存服务
-  redis:
-    image: redis:7-alpine
-    container_name: kronos-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - kronos-network
-    restart: unless-stopped
-    command: redis-server --appendonly yes
-
 networks:
   kronos-network:
     driver: bridge
-
-volumes:
-  redis_data:
-    driver: local
