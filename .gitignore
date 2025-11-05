@@ -329,7 +329,7 @@ docs/build/
 *.ckpt
 
 # Hugging Face
-models/
+# models/  # Commented out to allow backend/app/models/
 datasets/
 
 # Cache directories
