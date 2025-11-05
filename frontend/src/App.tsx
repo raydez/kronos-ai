@@ -59,7 +59,7 @@ const App: React.FC = () => {
         console.log('Processed prediction data:', processedPredictionData);
         setPredictionData(processedPredictionData);
 
-        // 获取预测时间段的实际数据（用于对比）
+        // 获取预测时间段的实际数据（用于对比）- 但不过滤预测数据
         if (processedPredictions.length > 0) {
           const firstPredictionDate = processedPredictions[0].date;
           
@@ -88,57 +88,14 @@ const App: React.FC = () => {
                   date: item.date.split('T')[0] // 只保留日期部分
                 }));
                 
-                // 重新设计的对齐逻辑：只显示有预测和实际数据的交易日
-                let alignedActual: any[] = [];
-                let alignedPredictions: any[] = [];
+                setActualData(processedActual);
                 
-                // 找出预测数据和实际数据中都存在的交易日
-                const actualDates = processedActual.map((actual: any) => actual.date);
-                const predictionDates = processedPredictions.map((prediction: any) => prediction.date);
-                
-                // 获取共同的交易日（既在预测中也在实际数据中）
-                const commonTradingDays = actualDates.filter((date: string) => 
-                  predictionDates.includes(date)
-                );
-                
-                if (commonTradingDays.length > 0) {
-                  // 使用共同的交易日作为对齐基准
-                  alignedActual = processedActual.filter((actual: any) => 
-                    commonTradingDays.includes(actual.date)
-                  );
-                  alignedPredictions = processedPredictions.filter((prediction: any) => 
-                    commonTradingDays.includes(prediction.date)
-                  );
-                  
-                  // 按日期排序
-                  alignedActual.sort((a, b) => a.date.localeCompare(b.date));
-                  alignedPredictions.sort((a, b) => a.date.localeCompare(b.date));
-                  
-                  console.log(`✅ 找到 ${commonTradingDays.length} 个共同交易日进行对比`);
-                } else {
-                  // 如果没有共同的交易日，显示所有可用的数据
-                  console.log('⚠️ 没有找到共同的交易日，显示所有可用数据');
-                  alignedActual = processedActual;
-                  alignedPredictions = processedPredictions.filter((prediction: any) => 
-                    actualDates.includes(prediction.date)
-                  );
-                }
-                
-                // 更新预测数据为交易日对齐的版本
-                const alignedPredictionData = {
-                  ...processedPredictionData,
-                  predictions: alignedPredictions
-                };
-                setPredictionData(alignedPredictionData);
-                setActualData(alignedActual);
-                
-                console.log('✅ 交易日对齐完成:');
+                console.log('✅ 实际数据获取完成:');
                 console.log('  用户选择预测天数:', targetDays);
-                console.log('  原始预测天数:', processedPredictions.length);
+                console.log('  预测数据天数:', processedPredictions.length);
                 console.log('  获取实际天数:', processedActual.length);
-                console.log('  可对比预测天数:', alignedPredictions.length);
-                console.log('  可对比实际天数:', alignedActual.length);
-                console.log('📅 可对比的交易日:', alignedActual.map(a => a.date));
+                console.log('📅 预测日期范围:', processedPredictions.map(p => p.date));
+                console.log('📅 实际日期范围:', processedActual.map(a => a.date));
               } else {
                 console.log('⚠️ 没有找到实际数据');
                 setActualData([]);

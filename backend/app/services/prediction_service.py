@@ -39,13 +39,20 @@ class PredictionService:
             predictions = await self._predict_with_kronos(stock_data, prediction_days, code, start_date)
             
             # 构建响应
-            model_info = ModelInfo(**model_manager.get_model_info())
+            model_info_dict = model_manager.get_model_info()
+            model_info = ModelInfo(
+                name=model_info_dict.get("name", "Kronos"),
+                version=model_info_dict.get("model", "unknown"),
+                status="loaded" if model_info_dict.get("model_loaded", False) else "offline",
+                description=model_info_dict.get("description", "")
+            )
             
             response = PredictionResponse(
                 code=code,
                 name=stock_info["name"],
+                prediction_days=prediction_days,
                 predictions=predictions,
-                model_info=model_info
+                model_info=model_info.dict()
             )
             
             return response
@@ -65,7 +72,7 @@ class PredictionService:
                 if predictions:
                     # 转换为PredictionPoint格式
                     prediction_points = []
-                    for pred in predictions:
+                    for i, pred in enumerate(predictions):
                         # 确保日期格式正确
                         date_value = pred['date']
                         if hasattr(date_value, 'strftime'):
@@ -73,13 +80,20 @@ class PredictionService:
                         else:
                             date_str = str(date_value).split('T')[0]  # 去掉时间部分
                         
+                        # 计算趋势
+                        current_close = pred['close']
+                        prev_close = stock_data[-1]['close'] if i == 0 else predictions[i-1]['close']
+                        trend = "up" if current_close > prev_close else "down" if current_close < prev_close else "stable"
+                        
                         prediction_points.append(PredictionPoint(
                             date=date_str,
                             open=pred['open'],
                             high=pred['high'],
                             low=pred['low'],
                             close=pred['close'],
-                            confidence=pred['confidence']
+                            predicted_close=pred['close'],
+                            confidence=pred['confidence'],
+                            trend=trend
                         ))
                     return prediction_points
                 else:

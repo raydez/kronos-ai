@@ -7,7 +7,7 @@ pandas==2.1.3
 numpy>=1.26.0
 
 # 数据源
-baostock==0.8.8
+baostock==0.8.9
 
 # 验证
 pydantic==2.5.0

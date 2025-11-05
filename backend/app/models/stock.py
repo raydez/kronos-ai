@@ -33,6 +33,10 @@ class PredictionResult(BaseModel):
 class PredictionPoint(BaseModel):
     """预测点模型"""
     date: str
+    open: float
+    high: float
+    low: float
+    close: float
     predicted_close: float
     confidence: float
     trend: str  # "up", "down", "stable"
@@ -41,6 +45,7 @@ class PredictionPoint(BaseModel):
 class PredictionResponse(BaseModel):
     """预测响应模型"""
     code: str
+    name: str
     prediction_days: int
     predictions: List[PredictionPoint]
     model_info: Dict[str, Any]
