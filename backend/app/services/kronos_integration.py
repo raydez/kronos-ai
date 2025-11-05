@@ -66,7 +66,6 @@ class KronosIntegration:
             'kronos-mini': {
                 'name': 'Kronos-mini',
                 'model_id': 'NeoQuasar/Kronos-mini',
-                'tokenizer_id': 'NeoQuasar/Kronos-Tokenizer-2k',
                 'context_length': 2048,
                 'params': '4.1M',
                 'description': 'Lightweight model, suitable for fast prediction'
@@ -74,7 +73,6 @@ class KronosIntegration:
             'kronos-small': {
                 'name': 'Kronos-small',
                 'model_id': 'NeoQuasar/Kronos-small',
-                'tokenizer_id': 'NeoQuasar/Kronos-Tokenizer-base',
                 'context_length': 512,
                 'params': '24.7M',
                 'description': 'Small model, balanced performance and speed'
@@ -82,7 +80,6 @@ class KronosIntegration:
             'kronos-base': {
                 'name': 'Kronos-base',
                 'model_id': 'NeoQuasar/Kronos-base',
-                'tokenizer_id': 'NeoQuasar/Kronos-Tokenizer-large',
                 'context_length': 1024,
                 'params': '85.6M',
                 'description': 'Base model, high accuracy'
@@ -111,43 +108,49 @@ class KronosIntegration:
             cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
             logger.info(f"检查缓存目录: {cache_dir}")
             
-            # 构建本地路径
-            tokenizer_local_path = None
-            model_local_path = None
-            
-            # 查找tokenizer本地路径
-            tokenizer_pattern = f"models--{config['tokenizer_id'].replace('/', '--')}"
-            tokenizer_cache = cache_dir / tokenizer_pattern
-            if tokenizer_cache.exists():
-                snapshots = list(tokenizer_cache.glob("snapshots/*"))
-                if snapshots:
-                    tokenizer_local_path = snapshots[0]
-                    logger.info(f"找到本地Tokenizer: {tokenizer_local_path}")
-            
             # 查找模型本地路径
             model_pattern = f"models--{config['model_id'].replace('/', '--')}"
             model_cache = cache_dir / model_pattern
+            model_local_path = None
+            
             if model_cache.exists():
                 snapshots = list(model_cache.glob("snapshots/*"))
                 if snapshots:
                     model_local_path = snapshots[0]
                     logger.info(f"找到本地模型: {model_local_path}")
             
-            # 加载tokenizer
-            if tokenizer_local_path and tokenizer_local_path.exists():
-                logger.info(f"从本地缓存加载Tokenizer: {tokenizer_local_path}")
-                self.tokenizer = KronosTokenizer.from_pretrained(str(tokenizer_local_path))
-            else:
-                logger.info(f"从HuggingFace加载Tokenizer: {config['tokenizer_id']}")
-                self.tokenizer = KronosTokenizer.from_pretrained(config['tokenizer_id'])
-            
-            # 加载模型（强制使用CPU）
+            # 加载模型和tokenizer（从同一个路径）
             if model_local_path and model_local_path.exists():
                 logger.info(f"从本地缓存加载模型: {model_local_path}")
                 self.model = Kronos.from_pretrained(str(model_local_path))
+                # 尝试加载tokenizer（应该在同一路径下）
+                try:
+                    tokenizer_path = model_local_path
+                    if (tokenizer_path / "tokenizer").exists():
+                        tokenizer_path = tokenizer_path / "tokenizer"
+                    self.tokenizer = KronosTokenizer.from_pretrained(str(tokenizer_path))
+                    logger.info("Tokenizer从模型目录加载成功")
+                except Exception as e:
+                    logger.warning(f"从模型目录加载Tokenizer失败: {e}, 将尝试从模型配置创建")
+                    self.tokenizer = None
             else:
                 logger.info(f"从HuggingFace加载模型: {config['model_id']}")
                 self.model = Kronos.from_pretrained(config['model_id'])
+                # 尝试加载tokenizer
+                try:
+                    # 检查模型下载后的路径
+                    if model_cache.exists():
+                        snapshots = list(model_cache.glob("snapshots/*"))
+                        if snapshots:
+                            model_local_path = snapshots[0]
+                            tokenizer_path = model_local_path
+                            if (tokenizer_path / "tokenizer").exists():
+                                tokenizer_path = tokenizer_path / "tokenizer"
+                            self.tokenizer = KronosTokenizer.from_pretrained(str(tokenizer_path))
+                            logger.info("Tokenizer从下载的模型目录加载成功")
+                except Exception as e:
+                    logger.warning(f"加载Tokenizer失败: {e}, 将尝试从模型配置创建")
+                    self.tokenizer = None
             
             # 创建预测器（使用CPU设备）
             self.predictor = KronosPredictor(self.model, self.tokenizer, device="cpu", max_context=config['context_length'])
@@ -162,6 +165,136 @@ class KronosIntegration:
             logger.error(f"加载Kronos模型失败: {e}")
             self.model_loaded = False
             return False
+    
+    def load_model_with_details(self, model_name: str = "kronos-small") -> Dict[str, Any]:
+        """加载Kronos模型并返回详细信息"""
+        if not KRONOS_AVAILABLE:
+            return {
+                "success": False,
+                "message": "Kronos模型模块不可用，请检查依赖安装",
+                "error": "KRONOS_AVAILABLE is False"
+            }
+        
+        try:
+            if model_name not in self.model_configs:
+                return {
+                    "success": False,
+                    "message": f"未知模型: {model_name}",
+                    "error": f"Model {model_name} not found in configs"
+                }
+            
+            config = self.model_configs[model_name]
+            logger.info(f"加载 {config['name']} 模型...")
+            
+            # 检查本地缓存路径
+            cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
+            logger.info(f"检查缓存目录: {cache_dir}")
+            
+            # 查找模型本地路径
+            model_pattern = f"models--{config['model_id'].replace('/', '--')}"
+            model_cache = cache_dir / model_pattern
+            model_local_path = None
+            model_from_cache = False
+            
+            if model_cache.exists():
+                snapshots = list(model_cache.glob("snapshots/*"))
+                if snapshots:
+                    model_local_path = snapshots[0]
+                    model_from_cache = True
+                    logger.info(f"找到本地模型: {model_local_path}")
+            
+            download_info = {
+                "tokenizer_downloaded": False,
+                "model_downloaded": False,
+                "tokenizer_source": "model",  # tokenizer 包含在模型中
+                "model_source": "cache" if model_from_cache else "huggingface"
+            }
+            
+            # 加载模型和tokenizer
+            if model_local_path and model_local_path.exists():
+                logger.info(f"从本地缓存加载模型: {model_local_path}")
+                try:
+                    self.model = Kronos.from_pretrained(str(model_local_path))
+                    # 尝试加载tokenizer
+                    tokenizer_path = model_local_path
+                    if (tokenizer_path / "tokenizer").exists():
+                        tokenizer_path = tokenizer_path / "tokenizer"
+                    self.tokenizer = KronosTokenizer.from_pretrained(str(tokenizer_path))
+                    logger.info("模型和Tokenizer从本地缓存加载成功")
+                except Exception as e:
+                    error_msg = f"从本地缓存加载失败: {str(e)}"
+                    logger.error(error_msg)
+                    return {
+                        "success": False,
+                        "message": error_msg,
+                        "error": str(e),
+                        "download_info": download_info
+                    }
+            else:
+                logger.info(f"从HuggingFace下载模型: {config['model_id']}")
+                logger.info(f"模型大小约: {config['params']}, 这可能需要较长时间，请耐心等待...")
+                try:
+                    self.model = Kronos.from_pretrained(config['model_id'])
+                    download_info["model_downloaded"] = True
+                    logger.info("模型下载成功")
+                    
+                    # 尝试加载tokenizer（从刚下载的模型目录）
+                    if model_cache.exists():
+                        snapshots = list(model_cache.glob("snapshots/*"))
+                        if snapshots:
+                            model_local_path = snapshots[0]
+                            tokenizer_path = model_local_path
+                            if (tokenizer_path / "tokenizer").exists():
+                                tokenizer_path = tokenizer_path / "tokenizer"
+                            self.tokenizer = KronosTokenizer.from_pretrained(str(tokenizer_path))
+                            logger.info("Tokenizer从下载的模型目录加载成功")
+                            download_info["tokenizer_downloaded"] = True
+                    
+                except Exception as e:
+                    error_msg = f"下载模型失败: {str(e)}"
+                    logger.error(error_msg)
+                    if "Connection" in str(e) or "timeout" in str(e).lower():
+                        error_msg += " (网络连接失败，请检查网络设置或代理配置)"
+                    elif "401" in str(e) or "403" in str(e):
+                        error_msg += " (认证失败，可能需要HuggingFace Token)"
+                    elif "disk" in str(e).lower() or "space" in str(e).lower():
+                        error_msg += " (磁盘空间不足)"
+                    return {
+                        "success": False,
+                        "message": error_msg,
+                        "error": str(e),
+                        "download_info": download_info
+                    }
+            
+            # 创建预测器（使用CPU设备）
+            self.predictor = KronosPredictor(self.model, self.tokenizer, device="cpu", max_context=config['context_length'])
+            
+            self.current_model = model_name
+            self.model_loaded = True
+            
+            success_message = f"成功加载 {config['name']} 模型在CPU上"
+            if download_info["tokenizer_downloaded"] or download_info["model_downloaded"]:
+                success_message += " (已下载到本地缓存)"
+            
+            logger.info(success_message)
+            
+            return {
+                "success": True,
+                "message": success_message,
+                "model_name": model_name,
+                "model_config": config,
+                "download_info": download_info
+            }
+            
+        except Exception as e:
+            logger.error(f"加载Kronos模型失败: {e}")
+            self.model_loaded = False
+            error_msg = f"加载模型时发生未预期的错误: {str(e)}"
+            return {
+                "success": False,
+                "message": error_msg,
+                "error": str(e)
+            }
     
     def predict_stock(self, stock_data: List[Dict[str, Any]], 
                       prediction_days: int = 5, start_date: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:

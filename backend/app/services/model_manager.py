@@ -68,27 +68,75 @@ class ModelManager:
     def reload_model(self):
         """重新加载模型"""
         logger.info("重新加载Kronos模型...")
-        kronos_integration.unload_model()
-        self._load_model()
+        
+        try:
+            # 先卸载当前模型
+            kronos_integration.unload_model()
+            
+            # 获取当前模型名称，如果未设置则使用默认值
+            current_model = getattr(kronos_integration, 'current_model', 'kronos-small')
+            
+            # 重新加载模型，并获取详细结果
+            result = kronos_integration.load_model_with_details(current_model)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"重新加载模型时出错: {e}")
+            return {
+                "success": False,
+                "message": f"重新加载模型失败: {str(e)}",
+                "error": str(e)
+            }
     
     def get_available_models(self):
-        """获取可用模型列表"""
+        """获取可用的模型列表"""
         return kronos_integration.get_available_models()
     
-    def switch_model(self, model_name: str) -> bool:
-        """切换模型"""
+    def get_current_model(self):
+        """获取当前加载的模型名称"""
+        return getattr(kronos_integration, 'current_model', None)
+    
+    def switch_model(self, model_name: str):
+        """切换到指定模型"""
+        logger.info(f"切换模型到: {model_name}")
+        
         try:
-            logger.info(f"切换到模型: {model_name}")
-            kronos_integration.unload_model()
-            success = kronos_integration.load_model(model_name)
-            if success:
-                logger.info(f"切换到模型 {model_name} 成功")
-            else:
-                logger.error(f"切换到模型 {model_name} 失败")
-            return success
+            # 获取当前模型名称
+            current_model = self.get_current_model()
+            
+            # 如果要切换的模型就是当前模型，直接返回
+            if current_model == model_name and kronos_integration.model_loaded:
+                return {
+                    "success": True,
+                    "message": f"模型 {model_name} 已经加载",
+                    "model_name": model_name
+                }
+            
+            # 卸载当前模型（如果有的话）
+            unloaded_model = None
+            if kronos_integration.model_loaded:
+                unloaded_model = current_model
+                logger.info(f"卸载当前模型: {current_model}")
+                kronos_integration.unload_model()
+            
+            # 加载新模型
+            result = kronos_integration.load_model_with_details(model_name)
+            
+            # 添加卸载的模型信息
+            if result.get("success") and unloaded_model:
+                result["unloaded_model"] = unloaded_model
+                result["message"] = f"已从 {unloaded_model} 切换到 {model_name}"
+            
+            return result
+            
         except Exception as e:
             logger.error(f"切换模型时出错: {e}")
-            return False
+            return {
+                "success": False,
+                "message": f"切换模型失败: {str(e)}",
+                "error": str(e)
+            }
 
 
 # 全局模型管理器实例

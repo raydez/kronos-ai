@@ -88,6 +88,18 @@ export class StockAPI {
     return response.data;
   }
 
+  // 获取可用模型列表
+  static async getAvailableModels(): Promise<APIResponse<any>> {
+    const response = await api.get('/model/available');
+    return response.data;
+  }
+
+  // 切换模型
+  static async switchModel(modelName: string): Promise<APIResponse<any>> {
+    const response = await api.post('/model/switch', { model_name: modelName });
+    return response.data;
+  }
+
   // 清空缓存
   static async clearCache(): Promise<APIResponse<any>> {
     const response = await api.delete('/cache');

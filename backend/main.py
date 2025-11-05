@@ -204,6 +204,108 @@ async def get_model_info():
         raise HTTPException(status_code=500, detail=f"获取模型信息失败: {str(e)}")
 
 
+@app.post("/model/reload")
+async def reload_model():
+    """重新加载模型"""
+    try:
+        logger.info("收到重新加载模型请求")
+        
+        # 调用模型管理器的重新加载方法
+        result = model_manager.reload_model()
+        
+        # 获取更新后的模型信息
+        model_info = model_manager.get_model_info()
+        
+        if result.get("success", False):
+            return APIResponse(
+                success=True,
+                data={
+                    "model_info": model_info,
+                    "message": result.get("message", "模型重新加载成功"),
+                    "download_info": result.get("download_info")
+                },
+                message="模型重新加载成功"
+            )
+        else:
+            return APIResponse(
+                success=False,
+                data={
+                    "model_info": model_info,
+                    "error": result.get("error", "未知错误")
+                },
+                message=result.get("message", "模型重新加载失败")
+            )
+        
+    except Exception as e:
+        logger.error(f"Reload model error: {e}")
+        raise HTTPException(status_code=500, detail=f"重新加载模型失败: {str(e)}")
+
+
+@app.get("/model/available")
+async def get_available_models():
+    """获取可用的模型列表"""
+    try:
+        logger.info("获取可用模型列表")
+        
+        # 获取可用模型列表
+        models = model_manager.get_available_models()
+        
+        return APIResponse(
+            success=True,
+            data={
+                "models": models,
+                "current_model": model_manager.get_current_model()
+            },
+            message="获取可用模型列表成功"
+        )
+        
+    except Exception as e:
+        logger.error(f"Get available models error: {e}")
+        raise HTTPException(status_code=500, detail=f"获取可用模型列表失败: {str(e)}")
+
+
+@app.post("/model/switch")
+async def switch_model(request: dict):
+    """切换模型"""
+    try:
+        model_name = request.get("model_name")
+        if not model_name:
+            raise HTTPException(status_code=400, detail="缺少模型名称参数")
+        
+        logger.info(f"收到切换模型请求: {model_name}")
+        
+        # 调用模型管理器的切换方法
+        result = model_manager.switch_model(model_name)
+        
+        # 获取更新后的模型信息
+        model_info = model_manager.get_model_info()
+        
+        if result.get("success", False):
+            return APIResponse(
+                success=True,
+                data={
+                    "model_info": model_info,
+                    "message": result.get("message", "模型切换成功"),
+                    "download_info": result.get("download_info"),
+                    "unloaded_model": result.get("unloaded_model")
+                },
+                message="模型切换成功"
+            )
+        else:
+            return APIResponse(
+                success=False,
+                data={
+                    "model_info": model_info,
+                    "error": result.get("error", "未知错误")
+                },
+                message=result.get("message", "模型切换失败")
+            )
+        
+    except Exception as e:
+        logger.error(f"Switch model error: {e}")
+        raise HTTPException(status_code=500, detail=f"切换模型失败: {str(e)}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
