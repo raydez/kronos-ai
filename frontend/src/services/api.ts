@@ -8,14 +8,40 @@ import {
   ModelInfo
 } from '../types';
 
+// 动态获取后端 API 地址
+const getApiBaseURL = (): string => {
+  // 1. 优先使用环境变量配置
+  if (process.env.REACT_APP_API_BASE_URL) {
+    return process.env.REACT_APP_API_BASE_URL;
+  }
+  
+  // 2. 在生产环境中，自动使用当前访问的主机
+  if (process.env.NODE_ENV === 'production') {
+    // 获取当前页面的 hostname
+    const hostname = window.location.hostname;
+    // 如果是 localhost 或 127.0.0.1，使用 localhost:8000
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://localhost:8000';
+    }
+    // 否则使用相同的 IP/域名，端口为 8000
+    return `http://${hostname}:8000`;
+  }
+  
+  // 3. 开发环境默认使用 localhost
+  return 'http://localhost:8000';
+};
+
 // 创建axios实例
 const api = axios.create({
-  baseURL: 'http://localhost:8000',
+  baseURL: getApiBaseURL(),
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
+
+// 在控制台输出当前使用的 API 地址（方便调试）
+console.log('API Base URL:', getApiBaseURL());
 
 // 请求拦截器
 api.interceptors.request.use(
