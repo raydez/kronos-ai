@@ -62,30 +62,37 @@ class KronosIntegration:
         self.current_model = "kronos-small"
         
         # 模型配置
+        # Note: 这些是示例配置。实际使用时需要：
+        # 1. 训练并上传您自己的Kronos模型到HuggingFace
+        # 2. 或者替换为您本地训练的模型路径
+        # 3. 或者使用其他兼容的时间序列模型
         self.model_configs = {
             'kronos-mini': {
                 'name': 'Kronos-mini',
-                'model_id': 'NeoQuasar/Kronos-mini',
-                'tokenizer_id': 'NeoQuasar/Kronos-Tokenizer-2k',
+                'model_id': 'NeoQuasar/Kronos-mini',  # 需要替换为实际的模型ID或本地路径
+                'tokenizer_id': 'NeoQuasar/Kronos-Tokenizer-2k',  # 需要替换为实际的tokenizer ID或本地路径
                 'context_length': 2048,
                 'params': '4.1M',
-                'description': 'Lightweight model, suitable for fast prediction'
+                'description': 'Lightweight model, suitable for fast prediction',
+                'available': False  # 标记模型是否可用
             },
             'kronos-small': {
                 'name': 'Kronos-small',
-                'model_id': 'NeoQuasar/Kronos-small',
-                'tokenizer_id': 'NeoQuasar/Kronos-Tokenizer-base',
+                'model_id': 'NeoQuasar/Kronos-small',  # 需要替换为实际的模型ID或本地路径
+                'tokenizer_id': 'NeoQuasar/Kronos-Tokenizer-base',  # 需要替换为实际的tokenizer ID或本地路径
                 'context_length': 512,
                 'params': '24.7M',
-                'description': 'Small model, balanced performance and speed'
+                'description': 'Small model, balanced performance and speed',
+                'available': False  # 标记模型是否可用
             },
             'kronos-base': {
                 'name': 'Kronos-base',
-                'model_id': 'NeoQuasar/Kronos-base',
-                'tokenizer_id': 'NeoQuasar/Kronos-Tokenizer-large',
-                'context_length': 1024,
+                'model_id': 'NeoQuasar/Kronos-base',  # 需要替换为实际的模型ID或本地路径
+                'tokenizer_id': 'NeoQuasar/Kronos-Tokenizer-base',  # 使用 base tokenizer（large 不存在）
+                'context_length': 512,  # 与 tokenizer-base 匹配
                 'params': '85.6M',
-                'description': 'Base model, high accuracy'
+                'description': 'Base model, high accuracy',
+                'available': False  # 标记模型是否可用
             }
         }
     
@@ -182,15 +189,52 @@ class KronosIntegration:
                 logger.info(f"加载 Tokenizer: {config['tokenizer_id']}")
                 if not tokenizer_from_cache:
                     logger.info("⏬ 需要从 HuggingFace 下载 Tokenizer，请耐心等待...")
+                
+                # 加载 tokenizer
                 self.tokenizer = KronosTokenizer.from_pretrained(config['tokenizer_id'])
                 logger.info("✅ Tokenizer 加载成功")
             except Exception as e:
                 error_msg = f"加载 Tokenizer 失败: {str(e)}"
                 logger.error(f"❌ {error_msg}")
-                if "Connection" in str(e) or "timeout" in str(e).lower():
-                    error_msg += " (网络连接失败，请检查网络设置或代理配置)"
-                elif "401" in str(e) or "403" in str(e):
-                    error_msg += " (认证失败，可能需要HuggingFace Token)"
+                
+                # 提供详细的错误信息和解决方案
+                if "401" in str(e) or "403" in str(e) or "Repository Not Found" in str(e) or "404" in str(e):
+                    error_msg = (
+                        f"❌ 模型仓库不存在或无法访问: {config['tokenizer_id']}\n\n"
+                        "可能的原因和解决方案：\n"
+                        "1. 该模型仓库不存在于 HuggingFace 上\n"
+                        "   → 需要先训练并上传 Kronos 模型到 HuggingFace\n"
+                        "   → 或者修改配置使用本地模型路径\n\n"
+                        "2. 如果是私有仓库，需要认证\n"
+                        "   → 设置 HuggingFace Token: export HF_TOKEN=your_token\n"
+                        "   → 或使用: huggingface-cli login\n\n"
+                        "3. 使用本地训练的模型\n"
+                        "   → 将模型路径改为本地路径，如: '/app/models/kronos-tokenizer'\n\n"
+                        "📖 详细文档: https://huggingface.co/docs/hub/models-uploading"
+                    )
+                elif "missing" in str(e).lower() and "required" in str(e).lower() and "arguments" in str(e).lower():
+                    error_msg = (
+                        f"❌ 模型配置文件缺失或不完整: {config['tokenizer_id']}\n\n"
+                        "错误原因：\n"
+                        f"KronosTokenizer 需要 16 个必需参数，但 HuggingFace 上的模型配置文件 (config.json) 缺失或不包含这些参数。\n\n"
+                        "解决方案：\n"
+                        "1. 确保 HuggingFace 模型仓库中包含完整的 config.json 文件\n"
+                        "   config.json 应包含以下参数：\n"
+                        "   - d_in, d_model, n_heads, ff_dim\n"
+                        "   - n_enc_layers, n_dec_layers\n"
+                        "   - ffn_dropout_p, attn_dropout_p, resid_dropout_p\n"
+                        "   - s1_bits, s2_bits, beta, gamma0, gamma, zeta, group_size\n\n"
+                        "2. 使用本地已训练好的模型\n"
+                        "   → 将配置文件中的 tokenizer_id 改为本地路径\n"
+                        "   → 例如: 'tokenizer_id': './models/kronos-tokenizer'\n\n"
+                        "3. 参考 Kronos webui 的实现\n"
+                        "   → 查看 Kronos/webui/app.py 中的模型加载逻辑\n"
+                        "   → 确保模型已正确训练并保存到本地或 HuggingFace\n\n"
+                        f"原始错误: {str(e)}"
+                    )
+                elif "Connection" in str(e) or "timeout" in str(e).lower():
+                    error_msg += "\n(网络连接失败，请检查网络设置或代理配置)"
+                
                 return {
                     "success": False,
                     "message": error_msg,
@@ -203,6 +247,8 @@ class KronosIntegration:
                 logger.info(f"加载模型: {config['model_id']}")
                 if not model_from_cache:
                     logger.info(f"⏬ 需要从 HuggingFace 下载模型（约 {config['params']}），请耐心等待...")
+                
+                # 加载模型
                 self.model = Kronos.from_pretrained(config['model_id'])
                 logger.info("✅ 模型加载成功")
             except Exception as e:
@@ -474,24 +520,48 @@ class KronosIntegration:
         ]
     
     def unload_model(self):
-        """卸载模型"""
-        if self.model:
-            del self.model
-        if self.tokenizer:
-            del self.tokenizer
-        if self.predictor:
+        """卸载模型并释放资源"""
+        import gc
+        
+        logger.info("开始卸载模型...")
+        
+        # 显式删除对象，确保引用计数归零
+        if self.predictor is not None:
             del self.predictor
+            self.predictor = None
+            logger.debug("Predictor 已删除")
         
-        self.model = None
-        self.tokenizer = None
-        self.predictor = None
+        if self.model is not None:
+            del self.model
+            self.model = None
+            logger.debug("Model 已删除")
+        
+        if self.tokenizer is not None:
+            del self.tokenizer
+            self.tokenizer = None
+            logger.debug("Tokenizer 已删除")
+        
+        # 重置状态
         self.model_loaded = False
+        self.current_model = None
         
-        # 清理GPU内存
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        # 强制垃圾回收，立即释放内存
+        collected = gc.collect()
+        logger.debug(f"垃圾回收完成，回收了 {collected} 个对象")
         
-        logger.info("Kronos模型已卸载")
+        # 清理 GPU 缓存（如果使用 GPU）
+        try:
+            if torch.cuda.is_available() and torch.cuda.is_initialized():
+                # 清空 GPU 缓存
+                torch.cuda.empty_cache()
+                # 同步 GPU 操作
+                torch.cuda.synchronize()
+                logger.info("✅ GPU 缓存已清理")
+        except Exception as e:
+            # GPU 相关错误，记录但不影响主流程
+            logger.debug(f"GPU 缓存清理时出现错误（可忽略）: {e}")
+        
+        logger.info("✅ 模型已卸载并释放资源")
 
 
 # 全局Kronos集成实例
