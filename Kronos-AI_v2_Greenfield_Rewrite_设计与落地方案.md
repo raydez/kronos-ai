@@ -3047,7 +3047,7 @@ RX-KAI-026 M
 ## 54.1 工程基线
 
 ```text
-Python 3.11+
+Python 3.12+
 type hints 全覆盖
 Pydantic v2
 pytest
