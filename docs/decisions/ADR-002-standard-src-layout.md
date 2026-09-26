@@ -26,7 +26,9 @@ docs/decisions/         # ADR
 
 要点：
 
-1. `requires-python = ">=3.11"`；开发环境锁定 Python 3.12（`.python-version`）。
+1. `requires-python = ">=3.12"`；开发环境锁定 Python 3.12（`.python-version`）。
+   （2026-09-26 修订：下限由 3.11 上调为 3.12——numpy 3.x stubs 与 mypy
+   `python_version` 需要 3.12 对齐，见 RX-KAI-004 评审。）
 2. 工具链：pytest、ruff、mypy（pydantic 插件）在 pyproject 内统一配置。
 3. 终态目录（§4）中的 `state/ decision/ calibration/ policy/ evaluation/ api/`
    等 Phase 3+ 子包在其对应任务开工时创建，不预先建空目录。

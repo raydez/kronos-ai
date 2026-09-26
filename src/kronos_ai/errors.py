@@ -24,7 +24,7 @@ class ModelInferenceError(KronosAIError):
 
 
 class CalendarError(KronosAIError):
-    """Trading calendar source failed or a date is outside calendar coverage."""
+    """Trading calendar failed, a date is outside coverage, or it is not a market session."""
 
 
 class ConfigurationError(KronosAIError):
