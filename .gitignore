@@ -6,18 +6,18 @@ __pycache__/
 # C extensions
 *.so
 
-Kronos/
+/Kronos/
 
 # Distribution / packaging
 .Python
-build/
+/build/
 develop-eggs/
-dist/
+/dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
 var/
@@ -276,9 +276,9 @@ ehthumbs.db
 Thumbs.db
 
 # Project specific
-data/
-cache/
-logs/
+/data/
+/cache/
+/logs/
 *.pkl
 *.model
 *.h5
@@ -336,11 +336,11 @@ docs/build/
 
 # Hugging Face
 # models/  # Commented out to allow backend/app/models/
-datasets/
+/datasets/
 
 # Cache directories
 .cache/
-cache/
+/cache/
 __pycache__/
 
 # Configuration files with secrets

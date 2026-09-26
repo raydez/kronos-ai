@@ -1,12 +1,16 @@
 from datetime import UTC, date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 from pydantic import ValidationError
 
 from kronos_ai.domain.time import (
     CUTOFF_POLICY_VERSION,
+    MARKET_SESSION_CLOSE,
+    SAME_DAY_EVENING,
     SHANGHAI,
     ResearchTime,
+    cutoff_policy_record,
     resolve_knowledge_cutoff,
 )
 
@@ -75,3 +79,44 @@ class TestResearchTime:
         tz = timezone(timedelta(hours=8))
         rt = ResearchTime(market_date=MD, knowledge_cutoff=datetime(2026, 9, 25, 18, 0, tzinfo=tz))
         assert rt.knowledge_cutoff.utcoffset() == timedelta(hours=8)
+
+
+class TestHistoricalDstWindow:
+    """1986-1991 中国夏令时：域内固定 +08:00，不使用 ZoneInfo 的历史规则。"""
+
+    def test_zoneinfo_premise(self) -> None:
+        # 前提校验：tzdata 在该期间为 +09:00，这正是域内固定 +08:00 的原因
+        tz = ZoneInfo("Asia/Shanghai")
+        assert datetime(1991, 6, 3, 18, 0, tzinfo=tz).utcoffset() == timedelta(hours=9)
+
+    @pytest.mark.parametrize("day", [date(1988, 7, 1), date(1991, 6, 3)])
+    def test_cutoff_stays_plus_eight(self, day: date) -> None:
+        cutoff = resolve_knowledge_cutoff(day, "same_day_evening")
+        assert cutoff.utcoffset() == timedelta(hours=8)
+        assert cutoff.hour == 18
+        assert ResearchTime(market_date=day, knowledge_cutoff=cutoff).knowledge_cutoff == cutoff
+
+
+class TestCutoffPolicyRecord:
+    def test_market_close_parameters(self) -> None:
+        record = cutoff_policy_record("market_close")
+        assert record.policy == "market_close"
+        assert record.policy_version == CUTOFF_POLICY_VERSION
+        assert record.parameters == {"session_close": MARKET_SESSION_CLOSE.isoformat()}
+
+    def test_same_day_evening_parameters(self) -> None:
+        record = cutoff_policy_record("same_day_evening")
+        assert record.parameters == {"evening": SAME_DAY_EVENING.isoformat()}
+
+    def test_explicit_parameters(self) -> None:
+        assert cutoff_policy_record("explicit").parameters == {"source": "caller_supplied"}
+
+    def test_record_describes_resolved_cutoff(self) -> None:
+        # parameters 与 resolve 结果不允许漂移
+        record = cutoff_policy_record("same_day_evening")
+        resolved = resolve_knowledge_cutoff(MD, "same_day_evening")
+        assert resolved.strftime("%H:%M:%S") == record.parameters["evening"]
+
+    def test_unknown_policy_rejected(self) -> None:
+        with pytest.raises(ValueError, match="unknown cutoff policy"):
+            cutoff_policy_record("whenever")  # type: ignore[arg-type]

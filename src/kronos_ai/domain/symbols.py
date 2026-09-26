@@ -1,6 +1,6 @@
 """Symbol 规范形式（基线文档 §7）。
 
-内部规范 symbol = 6 位数字代码（如 600000）。
+内部规范 symbol = 6 位 ASCII 数字代码（如 600000）。
 sh./sz./bj. 前缀形式仅允许在 Provider Adapter 边界存在，由本模块双向转换。
 """
 
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-SYMBOL_PATTERN = re.compile(r"^\d{6}$")
+SYMBOL_PATTERN = re.compile(r"^[0-9]{6}$")
 
 EXCHANGE_PREFIXES = ("sh", "sz", "bj")
 
@@ -24,6 +24,14 @@ def normalize_symbol(raw: str) -> str:
     if SYMBOL_PATTERN.match(text):
         return text
     raise ValueError(f"symbol must be a 6-digit code or sh./sz./bj. prefixed: {raw!r}")
+
+
+def validate_normalized_symbol(raw: str) -> str:
+    """要求输入已是规范形式（拒绝前缀），用于 domain 合同字段。"""
+    text = raw.strip()
+    if not SYMBOL_PATTERN.match(text):
+        raise ValueError(f"symbol must be normalized 6-digit code, got {raw!r}")
+    return text
 
 
 def is_normalized_symbol(symbol: str) -> bool:

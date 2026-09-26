@@ -3,7 +3,7 @@ name = "kronos-ai"
 version = "2.0.0a0"
 description = "Financial Forecast & Probabilistic Decision Research Platform (Kronos-AI v2)"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Kronos-AI maintainers" }]
 dependencies = [
@@ -32,7 +32,7 @@ packages = ["src/kronos_ai"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+addopts = "-ra --strict-markers --import-mode=importlib -m 'not integration and not benchmark'"
 markers = [
     "integration: requires real model weights or network; skipped by default",
     "benchmark: long-running benchmark smoke tests; run on demand",
@@ -44,7 +44,7 @@ source = ["src/kronos_ai"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 src = ["src", "tests"]
 extend-exclude = ["backend", "frontend"]
 

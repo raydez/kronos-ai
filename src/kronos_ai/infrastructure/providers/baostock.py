@@ -8,34 +8,38 @@ v1 的 5 处 `_generate_fallback_data` 静默 fallback 全部不迁移：
 - BaoStock 日线 volume 单位为股、amount 单位为元，与 domain 约定一致，无需换算；
 - available_at 采用保守常量 BAO_STOCK_PUBLISHED_AT（当日 18:00+08:00），
   该时刻须由 BaoStock 能力 spike（RX-KAI-006）核实后固化为版本化常量；
-- 停牌日（tradestatus=0）与无效价格行不是 valid bar，不进入 MarketHistory，
-  原始行级数据由 append-only raw snapshot（RX-KAI-015）负责留痕。
+- 停牌日（tradestatus=0）与无效价格（close<=0）行不是 valid bar，不进入
+  MarketHistory；无法识别的交易状态是数据缺陷，显式抛 DataQualityError；
+- 原始行级数据由 append-only raw snapshot（RX-KAI-015）负责留痕；
+- 有效 bar 数少于 lookback_bars（新股/长期停牌）时如实返回，由上层按
+  min_history_bars 策略抛 InsufficientHistoryError；窗口内无任何有效 bar
+  时本层直接抛 InsufficientHistoryError。
 
-会话说明：baostock 的登录态是进程级全局单会话，本 Provider 非线程安全，
-并发 worker 必须各自持有一个实例。
+会话说明：baostock 登录态是进程级全局单会话，由模块级引用计数管理
+（最后一个使用者 close 时才 logout），查询以会话锁串行化。
 """
 
 from __future__ import annotations
 
 import importlib
-import logging
+import threading
 from datetime import date, datetime, time, timedelta
 from types import ModuleType
 from typing import Any, cast
 
 import pandas as pd
+from pydantic import ValidationError
 
 from kronos_ai.data.base import MarketDataProvider  # noqa: F401  (re-export contract)
-from kronos_ai.domain.market import (
-    MarketBar,
-    MarketHistory,
-    compute_market_history_hash,
-)
+from kronos_ai.domain.market import MarketBar, MarketHistory
 from kronos_ai.domain.symbols import normalize_symbol
-from kronos_ai.domain.time import SHANGHAI
-from kronos_ai.errors import DataQualityError, ProviderError
-
-logger = logging.getLogger(__name__)
+from kronos_ai.domain.time import CN_TZ
+from kronos_ai.errors import (
+    ConfigurationError,
+    DataQualityError,
+    InsufficientHistoryError,
+    ProviderError,
+)
 
 BAO_STOCK_PUBLISHED_AT = time(18, 0)
 
@@ -56,14 +60,61 @@ _A_SHARE_FIRST_TRADE_DAY = date(1990, 12, 19)
 
 
 def to_baostock_code(symbol: str) -> str:
-    """规范 6 位代码 → BaoStock 前缀代码；未知板块显式失败而非猜测。"""
+    """规范 6 位代码 → BaoStock 前缀代码；未知板块显式失败而非猜测。
+
+    输入必须是已规范化代码（无 sh./sz./bj. 前缀）；无法映射属于调用方输入
+    错误，抛 ConfigurationError 而非 ProviderError。
+    """
     if symbol.startswith(("600", "601", "603", "605", "688", "689", "900")):
         return f"sh.{symbol}"
     if symbol.startswith(("000", "001", "002", "003", "200", "300", "301", "302")):
         return f"sz.{symbol}"
     if symbol.startswith(("43", "83", "87", "92")):
         return f"bj.{symbol}"
-    raise ProviderError(f"cannot map symbol {symbol!r} to a BaoStock exchange prefix")
+    raise ConfigurationError(f"cannot map symbol {symbol!r} to a BaoStock exchange prefix")
+
+
+class _BaostockSession:
+    """进程级 baostock 会话的引用计数管理：多实例共享、最后一个离开才 logout。"""
+
+    def __init__(self, module: ModuleType) -> None:
+        self.module = module
+        self.lock = threading.RLock()
+        self._refs = 0
+        self._logged_in = False
+
+    def acquire(self) -> None:
+        with self.lock:
+            if not self._logged_in:
+                result = self.module.login()
+                if getattr(result, "error_code", "1") != "0":
+                    raise ProviderError(
+                        f"baostock login failed: {getattr(result, 'error_msg', 'unknown')}"
+                    )
+                self._logged_in = True
+            self._refs += 1
+
+    def release(self) -> None:
+        with self.lock:
+            if self._refs > 0:
+                self._refs -= 1
+            if self._refs == 0 and self._logged_in:
+                self.module.logout()
+                self._logged_in = False
+
+
+_SESSIONS: dict[int, _BaostockSession] = {}
+_SESSIONS_LOCK = threading.Lock()
+
+
+def _session_for(module: ModuleType) -> _BaostockSession:
+    with _SESSIONS_LOCK:
+        key = id(module)
+        session = _SESSIONS.get(key)
+        if session is None or session.module is not module:
+            session = _BaostockSession(module)
+            _SESSIONS[key] = session
+        return session
 
 
 class BaoStockProvider:
@@ -75,14 +126,16 @@ class BaoStockProvider:
         baostock_module: ModuleType | None = None,
     ) -> None:
         if adjust_flag not in ADJUST_FLAG_TO_MODE:
-            raise ProviderError(f"unknown adjust_flag: {adjust_flag!r}")
+            raise ConfigurationError(f"unknown adjust_flag: {adjust_flag!r}")
         self._adjust_flag = adjust_flag
         self._adjustment_mode = ADJUST_FLAG_TO_MODE[adjust_flag]
         self._dataset_version = dataset_version
         self._bs = (
             baostock_module if baostock_module is not None else importlib.import_module("baostock")
         )
-        self._logged_in = False
+        self._session = _session_for(self._bs)
+        self._session_acquired = False
+        self._closed = False
 
     def __enter__(self) -> BaoStockProvider:
         return self
@@ -91,17 +144,18 @@ class BaoStockProvider:
         self.close()
 
     def close(self) -> None:
-        if self._logged_in:
-            self._bs.logout()
-            self._logged_in = False
-
-    def _ensure_logged_in(self) -> None:
-        if self._logged_in:
+        if self._closed:
             return
-        result = self._bs.login()
-        if getattr(result, "error_code", "1") != "0":
-            raise ProviderError(f"baostock login failed: {getattr(result, 'error_msg', 'unknown')}")
-        self._logged_in = True
+        self._closed = True
+        if self._session_acquired:
+            self._session.release()
+
+    def _ensure_session(self) -> None:
+        if self._closed:
+            raise ConfigurationError("BaoStockProvider is closed; create a new instance to query")
+        if not self._session_acquired:
+            self._session.acquire()
+            self._session_acquired = True
 
     def get_history(
         self,
@@ -110,9 +164,12 @@ class BaoStockProvider:
         knowledge_cutoff: datetime,
         lookback_bars: int,
     ) -> MarketHistory:
-        symbol = normalize_symbol(symbol)
+        try:
+            symbol = normalize_symbol(symbol)
+        except ValueError as exc:
+            raise ConfigurationError(f"invalid symbol: {symbol!r}") from exc
         if lookback_bars < 1:
-            raise DataQualityError(f"lookback_bars must be >= 1, got {lookback_bars}")
+            raise ConfigurationError(f"lookback_bars must be >= 1, got {lookback_bars}")
 
         code = to_baostock_code(symbol)
         bars = self._collect_bars(code, symbol, market_date, knowledge_cutoff, lookback_bars)
@@ -121,17 +178,9 @@ class BaoStockProvider:
             symbol=symbol,
             market_date=market_date,
             knowledge_cutoff=knowledge_cutoff,
-            bars=bars,
+            bars=tuple(bars),
             provider="baostock",
             dataset_version=self._dataset_version,
-            data_hash=compute_market_history_hash(
-                symbol=symbol,
-                market_date=market_date,
-                knowledge_cutoff=knowledge_cutoff,
-                provider="baostock",
-                dataset_version=self._dataset_version,
-                bars=bars,
-            ),
         )
 
     def _collect_bars(
@@ -143,6 +192,7 @@ class BaoStockProvider:
         lookback_bars: int,
     ) -> list[MarketBar]:
         span_days = max(30, lookback_bars * 2)
+        bars: list[MarketBar] = []
         for _ in range(4):
             start = market_date - timedelta(days=span_days)
             frame = self._fetch_window(code, start, market_date)
@@ -153,19 +203,22 @@ class BaoStockProvider:
             if start <= _A_SHARE_FIRST_TRADE_DAY:
                 break
         if not bars:
-            raise ProviderError(f"baostock returned no data for {code}")
+            raise InsufficientHistoryError(
+                f"baostock returned no valid bars for {code} up to {market_date}"
+            )
         return bars
 
     def _fetch_window(self, code: str, start: date, end: date) -> pd.DataFrame:
-        self._ensure_logged_in()
-        result = self._bs.query_history_k_data_plus(
-            code,
-            K_LINE_FIELDS,
-            start_date=start.isoformat(),
-            end_date=end.isoformat(),
-            frequency="d",
-            adjustflag=self._adjust_flag,
-        )
+        self._ensure_session()
+        with self._session.lock:
+            result = self._bs.query_history_k_data_plus(
+                code,
+                K_LINE_FIELDS,
+                start_date=start.isoformat(),
+                end_date=end.isoformat(),
+                frequency="d",
+                adjustflag=self._adjust_flag,
+            )
         if result is None:
             raise ProviderError(f"baostock query returned None for {code}")
         if getattr(result, "error_code", "1") != "0":
@@ -181,45 +234,52 @@ class BaoStockProvider:
             return []
 
         bars: list[MarketBar] = []
-        for row in frame.to_dict("records"):
-            status = TRADE_STATUS_MAP.get(str(row.get("tradestatus", "")).strip())
+        for idx, row in enumerate(frame.to_dict("records")):
+            bar_day_text = str(row.get("date", ""))
             try:
+                bar_day = date.fromisoformat(bar_day_text)
+                status = TRADE_STATUS_MAP[str(row["tradestatus"]).strip()]
                 close = float(row["close"])
-                bar_day = date.fromisoformat(str(row["date"]))
-            except (KeyError, TypeError, ValueError):
+            except (KeyError, TypeError, ValueError) as exc:
                 raise DataQualityError(
-                    f"baostock returned malformed row for {symbol}: {row!r}"
-                ) from None
-
-            timestamp = datetime.combine(bar_day, time(15, 0), tzinfo=SHANGHAI)
-            available_at = datetime.combine(bar_day, BAO_STOCK_PUBLISHED_AT, tzinfo=SHANGHAI)
+                    f"baostock returned malformed row #{idx} (date={bar_day_text!r}) "
+                    f"for {symbol}: {exc}"
+                ) from exc
 
             if status == "suspended" or close <= 0:
                 continue
+
+            timestamp = datetime.combine(bar_day, time(15, 0), tzinfo=CN_TZ)
+            available_at = datetime.combine(bar_day, BAO_STOCK_PUBLISHED_AT, tzinfo=CN_TZ)
             if available_at > knowledge_cutoff:
                 continue
 
-            volume = self._optional_float(row.get("volume"))
-            amount = self._optional_float(row.get("amount"))
-            bars.append(
-                MarketBar(
-                    symbol=symbol,
-                    timestamp=timestamp,
-                    open=float(row["open"]),
-                    high=float(row["high"]),
-                    low=float(row["low"]),
-                    close=close,
-                    volume=volume,
-                    amount=amount,
-                    trade_status=status,
-                    adjustment_mode=self._adjustment_mode,
-                    available_at=available_at,
+            try:
+                bars.append(
+                    MarketBar(
+                        symbol=symbol,
+                        timestamp=timestamp,
+                        open=float(row["open"]),
+                        high=float(row["high"]),
+                        low=float(row["low"]),
+                        close=close,
+                        volume=self._optional_float(row.get("volume")),
+                        amount=self._optional_float(row.get("amount")),
+                        trade_status=status,
+                        adjustment_mode=self._adjustment_mode,
+                        available_at=available_at,
+                    )
                 )
-            )
+            except (KeyError, TypeError, ValueError, ValidationError) as exc:
+                raise DataQualityError(
+                    f"baostock returned malformed row #{idx} (date={bar_day_text!r}) "
+                    f"for {symbol}: {exc}"
+                ) from exc
         return bars
 
     @staticmethod
     def _optional_float(value: Any) -> float | None:
+        """缺失/空串/非正数 → None（domain 允许 volume/amount 为 None）。"""
         try:
             parsed = float(value)
         except (TypeError, ValueError):
