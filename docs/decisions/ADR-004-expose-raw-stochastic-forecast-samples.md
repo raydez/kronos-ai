@@ -74,10 +74,9 @@ future_sessions 来自 TradingCalendar.next_sessions（§11），长度 == horiz
 ### 4. 接口落点与命名
 
 §10 推荐的接口是 `KronosSampler.generate_samples(history, request) -> list[ForecastSample]`。
-`ForecastSample` / `ForecastDistribution` 是 RX-KAI-012 的交付物，本任务先交付其前置：
-`KronosSampler.decode_raw_samples(history, request) -> RawSampleSet`。
-命名刻意不叫 `generate_samples`：该名字留给 RX-KAI-012 落地 §10 形态的接口，
-避免同一名字先指 raw tensor 再指分布对象。RX-KAI-012 只做包装，不再触碰采样路径。
+RX-KAI-010 先交付其前置：`KronosSampler.decode_raw_samples(history, request) -> RawSampleSet`；
+RX-KAI-012 已在其上落地 §10 形态的 `generate_samples`（对 raw 样本做纯转换，
+不再触碰采样路径，见下节 §7）。
 
 ### 5. 单 symbol 是构造性约束
 
@@ -120,3 +119,43 @@ mean(v2 raw samples, axis=sample) == auto_regressive_inference(...) 的输出
 - 数值等价性以 eval 模式为前提（`vendor/module.py:387` 的
   `is_causal_flag = self.training` 改变 s2 注意力掩码）：上游 canonical 用法同样是
   eval（`from_pretrained` 末尾调用 `.eval()`），KronosRuntime 强制 eval（RX-KAI-009）。
+
+## 7. RX-KAI-012 落地：ForecastSample / ForecastDistribution 与版本化 metric registry
+
+§11–§14 的消费契约已落地，落点与关键决策：
+
+- **契约**（`domain/forecast.py`）：`ForecastPoint` / `ForecastSample`（§11）、
+  `ThresholdProbability` / `QuantileValue` / `ForecastDistribution`（§12）、
+  `SamplingMetadata` / `ForecastResult`（§14）。`ForecastSample.points` 用 tuple 而非
+  list：frozen 模型 + tuple 才真正不可变（list 字段在 frozen 下仍可原地改写）。
+- **raw → domain 转换 + 分布构建**（`forecast/distribution.py`）：
+  `forecast_samples_from_raw` 按 feature 名索引把 `RawSampleSet` 转成 `ForecastSample`，
+  时间轴直接采用 `RawSampleSet.future_sessions`（个股停牌不改变时间轴，§11）；
+  `build_distribution(raw, origin_close=…)` 计算 §13 指标并组装 §12 分布对象。
+  该模块按结构消费 `RawSampleSet`（类型仅 TYPE_CHECKING 引入），避免
+  sampler ↔ distribution 运行时循环 import。
+- **§10 接口**：`KronosSampler.generate_samples` 现在返回
+  `list[ForecastSample]`，实现是 `list(forecast_samples_from_raw(decode_raw_samples(...)))`，
+  采样路径零改动。
+- **§12 移除写死 2%**：阈值/分位由版本化 `DistributionSpec` 显式给出
+  （`DEFAULT_DISTRIBUTION_SPEC` 只作为默认值，不再是 schema 常量）。
+  `ForecastDistribution` 内不含任何写死的阈值字段。
+- **§12/§13/DoD17 metric registry 版本化**：`FORECAST_METRIC_REGISTRY_VERSION`
+  （`forecast-metrics-v1`）+ `_FORECAST_METRICS` 定义 `horizon_return` / `log_return` /
+  `max_drawdown` / `path_volatility`。`ThresholdProbability.metric` 与
+  `QuantileValue.metric` 经 `AfterValidator` 强制来自 registry，backend 不能自造名称；
+  `ForecastDistribution.metric_definition_version` 经白名单
+  （`SUPPORTED_FORECAST_METRIC_VERSIONS`）校验——升级时把旧版本号追加进白名单，
+  删除会让历史 artifact 无法反序列化。新增/改数学定义必须升版本。
+- **spec 版本可追溯**：`ForecastDistribution.distribution_spec_version` 记录构建时
+  使用的 `DistributionSpec.version`（默认 `distribution-spec-v1`），使默认阈值变更
+  在产物上可见（也是 RX-KAI-013 cache key 的输入之一）。
+- **provenance 单点一致**：`ForecastResult` 交叉校验
+  `sampling.sample_count == distribution.sample_count`——同一 run 的两个记录互相矛盾
+  属 provenance 缺陷（DoD12），必须在构造时显式失败。
+- **分位插值显式化**：`np.quantile(..., method="linear")` 写死，不依赖 numpy 默认值。
+- **数学定义显式化**（§13）：收益类指标 `P_0 = forecast origin close`；`max_drawdown`
+  与 `path_volatility` 的 close path 含 `P_0`；离散度与波动率用总体标准差（ddof=0，
+  样本集即完整经验分布）。`P_0` 或任一 close 非正/非有限 → `ModelInferenceError`（§3.2）。
+- **`generate_samples` 不消费 `origin_close`**：分布是独立步骤（需要 `P_0`），
+  由调用方显式提供；采样层不持有「分布」语义。

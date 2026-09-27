@@ -51,7 +51,7 @@ import pandas as pd
 import torch
 
 from kronos_ai.data.calendar import TradingCalendar
-from kronos_ai.domain.forecast import ForecastRequest, SamplingConfig
+from kronos_ai.domain.forecast import ForecastRequest, ForecastSample, SamplingConfig
 from kronos_ai.domain.market import MarketBar, MarketHistory
 from kronos_ai.domain.time import CN_TZ, MARKET_SESSION_CLOSE
 from kronos_ai.errors import (
@@ -62,6 +62,7 @@ from kronos_ai.errors import (
 )
 from kronos_ai.forecast.backends.kronos.rng import RunRNG
 from kronos_ai.forecast.backends.kronos.runtime import KronosRuntime
+from kronos_ai.forecast.distribution import forecast_samples_from_raw
 
 FEATURE_NAMES: tuple[str, ...] = ("open", "high", "low", "close", "volume", "amount")
 TIME_FEATURE_NAMES: tuple[str, ...] = ("minute", "hour", "weekday", "day", "month")
@@ -189,6 +190,17 @@ class KronosSampler:
             feature_names=FEATURE_NAMES,
             values=values,
         )
+
+    def generate_samples(
+        self, history: MarketHistory, request: ForecastRequest
+    ) -> list[ForecastSample]:
+        """§10 推荐接口：在 mean 之前截取 raw samples，转为可持久化 ForecastSample 序列。
+
+        聚合统计（均值/分位/阈值概率）不在此层：raw samples 是研究原料，分布由
+        ``forecast.distribution.build_distribution`` 显式构建（§10 禁止 mean 伪装成分布）。
+        """
+        raw = self.decode_raw_samples(history, request)
+        return list(forecast_samples_from_raw(raw))
 
     @property
     def _clip(self) -> float:
