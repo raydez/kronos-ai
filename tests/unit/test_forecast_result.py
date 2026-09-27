@@ -265,6 +265,34 @@ class TestForecastResult:
                 artifact_id="key",
             )
 
+    def test_duplicate_sample_id_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="contiguous"):
+            ForecastResult(
+                symbol="600000",
+                market_date=MD,
+                knowledge_cutoff=CUTOFF,
+                samples=(sample(0), sample(0), sample(2)),  # id 1 缺失、0 重复
+                distribution=distribution(),
+                model=model_metadata(),
+                sampling=SamplingMetadata.from_config(SamplingConfig(seed=7, sample_count=3)),
+                input_data_hash=HASH,
+                artifact_id="key",
+            )
+
+    def test_out_of_order_sample_id_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="contiguous"):
+            ForecastResult(
+                symbol="600000",
+                market_date=MD,
+                knowledge_cutoff=CUTOFF,
+                samples=(sample(1), sample(0), sample(2)),
+                distribution=distribution(),
+                model=model_metadata(),
+                sampling=SamplingMetadata.from_config(SamplingConfig(seed=7, sample_count=3)),
+                input_data_hash=HASH,
+                artifact_id="key",
+            )
+
     def test_cutoff_must_fall_on_market_date(self) -> None:
         with pytest.raises(ValidationError, match="market_date"):
             ForecastResult(

@@ -293,11 +293,15 @@ def _metric_series(raw: RawSampleSet, *, origin_close: float) -> dict[str, np.nd
     path = np.concatenate([np.full((closes.shape[0], 1), origin_close), closes], axis=1)
     log_path = np.log(path)
     drawdown = path / np.maximum.accumulate(path, axis=1) - 1.0
+    # path_volatility = 逐步 log return 的总体标准差（ddof=0，与 registry 描述一致）。
+    # horizon == 1 时只有单个 log return，总体标准差定义为 0（非「无波动」的语义主张），
+    # 这是刻意且已版本化的口径，不是缺失数据。
+    path_volatility = np.diff(log_path, axis=1).std(axis=1)
     return {
         "horizon_return": closes[:, -1] / origin_close - 1.0,
         "log_return": log_path[:, -1] - log_path[:, 0],
         "max_drawdown": drawdown.min(axis=1),
-        "path_volatility": np.diff(log_path, axis=1).std(axis=1),
+        "path_volatility": path_volatility,
     }
 
 

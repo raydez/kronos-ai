@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import tempfile
 from collections.abc import Callable, Mapping
@@ -44,7 +45,10 @@ from kronos_ai.forecast.distribution import (
     distribution_spec_hash,
 )
 
-FORECAST_ARTIFACT_KEY_VERSION = "forecast-artifact-key-v1"
+# v2: 把 forecast origin close ``P_0`` 纳入身份。P_0 是全部收益/回撤/波动指标的锚点，
+# 若不进 key，同一份 history 可以派生出两个「同 digest、不同 origin_close」的 artifact，
+# 且都能通过 _verify——这正是 §15「同一个 key 不得有不同输出」要杜绝的。
+FORECAST_ARTIFACT_KEY_VERSION = "forecast-artifact-key-v2"
 
 # §15 的模型维由 KronosRuntime.artifact_identity() 整体提供；config_hash 额外覆盖
 # lookback_bars / max_context / clip / tokenizer 版本（§8：lookback_bars 必须进入
@@ -101,6 +105,9 @@ class ForecastArtifactKey(BaseModel):
 
     horizon: int = Field(ge=1)
     future_sessions: tuple[date, ...]
+    # forecast origin close P_0：由 history 的最后一根 bar 派生（见 build_forecast_artifact_key），
+    # 是 distribution 全部收益类指标的基准，因此属于身份。
+    origin_close: float = Field(gt=0)
 
     model_id: str
     model_revision: str
@@ -151,7 +158,7 @@ class ForecastArtifactKey(BaseModel):
         _reject_bool(value, str(info.field_name))
         return value
 
-    @field_validator("temperature", "top_p")
+    @field_validator("temperature", "top_p", "origin_close")
     @classmethod
     def _floats_finite(cls, value: float, info: ValidationInfo) -> float:
         if value != value or value in (float("inf"), float("-inf")):
@@ -191,6 +198,7 @@ class ForecastArtifactKey(BaseModel):
             "knowledge_cutoff": self.knowledge_cutoff.isoformat(),
             "horizon": self.horizon,
             "future_sessions": [day.isoformat() for day in self.future_sessions],
+            "origin_close": self.origin_close,
             "model_id": self.model_id,
             "model_revision": self.model_revision,
             "runtime_version": self.runtime_version,
@@ -229,6 +237,10 @@ def build_forecast_artifact_key(
     参与推理，也是 artifact 中 ForecastPoint 的时间线。两个日历即使输入相同也会给出
     不同输出，因此时间轴必须进 key。用**与 sampler 同一**的 ``calendar.next_sessions``
     派生，保证 key 与推理实际使用的时间轴一致。
+
+    ``origin_close``（P_0）同样必须进 key：它是全部收益/回撤/波动指标的锚点，且可由
+    ``history`` 唯一确定（lookback 窗口末根 bar 的 close）。这里从 history 派生而非
+    接收调用方入参，让「key 认定的 P_0」与「分布使用的 P_0」不可能分叉。
     """
     missing = [key for key in REQUIRED_MODEL_IDENTITY_KEYS if key not in model_identity]
     if missing:
@@ -272,6 +284,7 @@ def build_forecast_artifact_key(
         knowledge_cutoff=request.knowledge_cutoff,
         horizon=request.horizon,
         future_sessions=future_sessions,
+        origin_close=history.bars[-1].close,
         distribution_spec_hash=distribution_spec_hash(distribution_spec),
         seed=sampling.seed,
         sample_count=sampling.sample_count,
@@ -320,9 +333,44 @@ def _atomic_write_bytes(path: Path, data: bytes) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp, path)
+        _fsync_dir(path.parent)
     finally:
         # os.replace 成功后 tmp 已不存在；异常路径下清理半成品。
         tmp.unlink(missing_ok=True)
+
+
+# 目录 fsync 在部分平台 / 文件系统上不被支持：这些 errno 视为可跳过，其余（如 EIO）
+# 必须显式上抛，避免把「rename 未持久化」静默当成成功（§3.2）。
+_DIR_FSYNC_UNSUPPORTED = {
+    errno.EINVAL,
+    getattr(errno, "ENOTSUP", errno.EINVAL),
+    errno.EBADF,
+    errno.EPERM,
+    errno.EACCES,
+    errno.EROFS,
+}
+
+
+def _fsync_dir(directory: Path) -> None:
+    """把 rename 持久化到父目录：只 fsync 文件不保证崩溃后 rename 仍在（§15）。
+
+    平台差异：Windows 无法 open 目录，``O_DIRECTORY`` 仅 POSIX 可用；这类
+    「不支持」情形跳过即可（缓存本身可重算），但真实的 I/O 错误必须上抛。
+    """
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    try:
+        dir_fd = os.open(directory, flags)
+    except OSError as exc:
+        if exc.errno in _DIR_FSYNC_UNSUPPORTED:
+            return
+        raise
+    try:
+        os.fsync(dir_fd)
+    except OSError as exc:
+        if exc.errno not in _DIR_FSYNC_UNSUPPORTED:
+            raise
+    finally:
+        os.close(dir_fd)
 
 
 class FileSystemForecastCache:
@@ -414,6 +462,11 @@ class FileSystemForecastCache:
             result.distribution.distribution_spec_hash == key.distribution_spec_hash,
             f"distribution_spec_hash {result.distribution.distribution_spec_hash!r} != key "
             f"{key.distribution_spec_hash!r}",
+        )
+        check(
+            result.distribution.origin_close == key.origin_close,
+            f"distribution.origin_close {result.distribution.origin_close!r} != key "
+            f"{key.origin_close!r}",
         )
         # 直接用版本号再校一次：spec hash 已折叠两者，但显式比对能给出可读错误，
         # 并防止未来重构把版本号从 hash 中悄然移除而无人发现。

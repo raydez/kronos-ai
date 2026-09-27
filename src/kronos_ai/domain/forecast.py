@@ -527,7 +527,8 @@ class SamplingMetadata(BaseModel):
 class ForecastResult(BaseModel):
     """一次 forecast 的完整产物 + provenance（§14）。
 
-    契约约束：samples 条数 == distribution.sample_count，每条 points 长度 == distribution.horizon；
+    契约约束：samples 条数 == distribution.sample_count，sample_id 为 0-based 连续升序
+    （与 RawSampleSet 行一一对应），每条 points 长度 == distribution.horizon；
     input_data_hash 绑定输入快照，artifact_id 绑定缓存键（§15，由 cache 层填充）。
     """
 
@@ -577,4 +578,13 @@ class ForecastResult(BaseModel):
                     f"sample {sample.sample_id} has {len(sample.points)} points != "
                     f"distribution.horizon {self.distribution.horizon}"
                 )
+        # sample_id 是 run 内 0-based 序号（§11），排序后与 RawSampleSet 行一一对应；
+        # 重复 / 缺号 / 乱序会让下游按 id 关联时静默错配，属于契约违反（§3.2）。
+        actual_ids = [sample.sample_id for sample in self.samples]
+        expected_ids = list(range(self.distribution.sample_count))
+        if actual_ids != expected_ids:
+            raise ValueError(
+                "samples sample_id must be contiguous 0..sample_count-1 in order; "
+                f"got {actual_ids}"
+            )
         return self

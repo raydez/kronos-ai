@@ -118,6 +118,13 @@ def test_drawdown_and_volatility() -> None:
     assert dist.expected_path_volatility == pytest.approx(expected_vol)
 
 
+def test_horizon_one_path_volatility_is_zero_by_definition() -> None:
+    """§13.3 用逐步 log return 的总体标准差（ddof=0）：
+    horizon=1 时只有单个 log return，总体标准差定义为 0，是刻意且已版本化的口径。"""
+    dist = build_distribution(raw_set([[105.0], [95.0]]), origin_close=100.0)
+    assert dist.expected_path_volatility == 0.0
+
+
 def test_custom_spec_targets_other_metrics() -> None:
     spec = DistributionSpec(
         thresholds=(ThresholdSpec(metric="max_drawdown", operator="lte", threshold=-0.05),),

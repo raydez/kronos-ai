@@ -65,6 +65,7 @@ KEY_FIELDS: dict[str, object] = {
     "knowledge_cutoff": CUTOFF,
     "horizon": 2,
     "future_sessions": SESSIONS,
+    "origin_close": 10.0,
     "model_id": MODEL_IDENTITY["model_id"],
     "model_revision": MODEL_IDENTITY["model_revision"],
     "runtime_version": MODEL_IDENTITY["runtime_version"],
@@ -105,6 +106,7 @@ def make_result(
     symbol: str = "600000",
     input_data_hash: str = HASH,
     close: float = 10.0,
+    origin_close: float = 10.0,
     sessions: tuple[date, ...] = SESSIONS,
     spec_hash: str = SPEC_HASH,
     market_date: date = MD,
@@ -117,7 +119,7 @@ def make_result(
     distribution = Distribution(
         horizon=len(sessions),
         sample_count=2,
-        origin_close=close,
+        origin_close=origin_close,
         expected_return=0.01,
         median_return=0.01,
         threshold_probabilities=(
@@ -161,14 +163,14 @@ class TestForecastArtifactKey:
 
     def test_golden_digest(self) -> None:
         # golden：字段构成 / hashing payload / canonical json 任一改变都会让本断言变红。
-        assert make_key().digest == "25bebed3ea465dcc24297fe3cb4924e5e9bfa6667818e09bfcbeb4e900d077e1"
+        assert make_key().digest == "cd3d963e0d1bc99467211ee6c38ad93d1766242cdb48eb4726902f1f335eb5f1"
 
     def test_key_version_participates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """key 版本必须真的进入 payload：只改版本号，digest 就得变（而非同名同义反复）。"""
         base = make_key().digest
         monkeypatch.setattr(
             "kronos_ai.forecast.cache.FORECAST_ARTIFACT_KEY_VERSION",
-            "forecast-artifact-key-v2",
+            "forecast-artifact-key-v3",
         )
         assert make_key().digest != base
 
@@ -184,6 +186,7 @@ class TestForecastArtifactKey:
             ("symbol", "000001"),
             ("input_data_hash", "c" * 64),
             ("future_sessions", (date(2026, 9, 29), date(2026, 9, 30))),
+            ("origin_close", 11.0),
             ("distribution_spec_hash", "d" * 64),
             ("model_id", "other/model"),
             ("model_revision", "0" * 40),
@@ -219,6 +222,12 @@ class TestForecastArtifactKey:
     def test_bad_distribution_spec_hash_rejected(self) -> None:
         with pytest.raises(ValidationError, match="distribution_spec_hash"):
             make_key(distribution_spec_hash="not-a-hash")
+
+    def test_origin_close_must_be_positive_and_finite(self) -> None:
+        with pytest.raises(ValidationError, match="origin_close"):
+            make_key(origin_close=0.0)
+        with pytest.raises(ValidationError, match="origin_close"):
+            make_key(origin_close=float("inf"))
 
     def test_future_sessions_must_match_horizon(self) -> None:
         with pytest.raises(ValidationError, match="future_sessions"):
@@ -272,7 +281,11 @@ class TestBuildForecastArtifactKey:
             session_calendar.next_sessions(MD, 2)  # type: ignore[attr-defined]
         )
         assert key.distribution_spec_hash == SPEC_HASH
-        assert key.digest == make_key(input_data_hash=history.data_hash).digest  # type: ignore[attr-defined]
+        assert key.origin_close == history.bars[-1].close  # type: ignore[attr-defined]
+        assert key.digest == make_key(
+            input_data_hash=history.data_hash,  # type: ignore[attr-defined]
+            origin_close=history.bars[-1].close,  # type: ignore[attr-defined]
+        ).digest
 
     def test_different_calendar_changes_digest(
         self, make_history: object, session_calendar: object
@@ -570,6 +583,7 @@ class TestProvenanceVerification:
             ("input_data_hash", "e" * 64, "input_data_hash"),
             ("symbol", "000001", "symbol"),
             ("spec_hash", "d" * 64, "distribution_spec_hash"),
+            ("origin_close", 999.0, "origin_close"),
             ("config_hash", "d" * 64, "model.config_hash"),
             ("seed", 8, "sampling.seed"),
             (
@@ -618,6 +632,17 @@ class TestProvenanceVerification:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(canonical_json(foreign.model_dump(mode="json")).encode("utf-8"))
         with pytest.raises(ArtifactError, match="distribution_spec_hash"):
+            cache.get(key)
+
+    def test_get_rejects_artifact_computed_with_other_origin_close(self, tmp_path: Path) -> None:
+        """用例：同 key 但 artifact 的 P_0（origin_close）不同——不得静默返回。"""
+        cache = FileSystemForecastCache(tmp_path)
+        key = make_key()
+        foreign = make_result(artifact_id=key.digest, origin_close=123.0)
+        path = cache.path_for(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(canonical_json(foreign.model_dump(mode="json")).encode("utf-8"))
+        with pytest.raises(ArtifactError, match="origin_close"):
             cache.get(key)
 
     def test_get_rejects_artifact_on_other_calendar_timeline(self, tmp_path: Path) -> None:

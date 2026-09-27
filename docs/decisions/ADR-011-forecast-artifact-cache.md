@@ -33,7 +33,7 @@ v1 没有 forecast 级缓存，最接近的是一次性脚本产物。§15 因�
 
 ```text
 symbol, input_data_hash, market_date, knowledge_cutoff, horizon,
-future_sessions, distribution_spec_hash,
+future_sessions, origin_close, distribution_spec_hash,
 model_id, model_revision, runtime_version, device_class, dtype, config_hash,
 seed, sample_count, temperature, top_k, top_p
 ```
@@ -48,6 +48,10 @@ seed, sample_count, temperature, top_k, top_p
   `ForecastPoint.timestamp` 的取值。两份日历对同一 `(symbol, market_date, horizon)`
   可给出不同 session 序列，因此时间轴不同 = 输出不同，必须进 key。派生必须用
   **与 sampler 同一**的 `calendar.next_sessions`，否则 key 与推理实际时间轴脱钩。
+- `origin_close`（P_0，forecast origin close）是全部收益 / 回撤 / 波动指标的锚点，
+  因此逐属身份。它由 `history` 唯一确定（lookback 窗口末根 bar 的 close），
+  在 `build_forecast_artifact_key` 内从 history 派生而非接收调用方入参——否则同一份
+  history 可派生出两个「同 digest、不同 P_0」的 artifact 且都能通过 `_verify`。
 - `distribution_spec_hash` 折叠 `DistributionSpec`（阈值/分位，含其 `version`）
   + `FORECAST_METRIC_REGISTRY_VERSION` + `FORECAST_AGGREGATION_DEFINITION_VERSION`。
   同一批 raw samples 在不同 spec 或不同指标/聚合口径下会产出不同
@@ -85,6 +89,7 @@ artifact_id != key.digest                   → ArtifactError
 symbol / market_date / knowledge_cutoff     → ArtifactError
 input_data_hash                             → ArtifactError
 distribution.horizon / sample_count         → ArtifactError
+distribution.origin_close                    → ArtifactError
 distribution.distribution_spec_hash         → ArtifactError
 distribution.metric_definition_version / aggregation_definition_version → ArtifactError
 sampling.{seed, sample_count, temperature, top_k, top_p} → ArtifactError
@@ -96,6 +101,13 @@ sample 的 point 时间轴 != key.future_sessions → ArtifactError
 分布 spec 或别的采样参数（这正是本任务评审构造出的反例）。写入路径（`put`）走同一
 个 `_verify`，因此「推理产物与 key 不符」在落盘前就已失败。逐维失败会一次性汇报所有
 不匹配维（拼接为一条 `ArtifactError`），便于定位是哪一层 provenance 漏回填。
+
+`_verify` 校验的是**输入身份与分布锚点**，不重算样本路径与指标值（那需要重跑推理，
+违背缓存目的）。因此缓存正确性以「`compute()` 诚实且确定性」为前提：它把可信
+实现产出的 `ForecastResult` 绑定到由 `(history, request, calendar, spec)` 派生的 key。
+若调用方伪造 `input_data_hash`（例如同末根 close、不同早期 bars），理论上可写入
+「同 key 异输出」——这已超出缓存层的职责边界，由 §9 的 determinism 测试与
+artifact provenance 审计共同兜底。
 
 ### 3. `cached_forecast` 是 §15 的唯一执行点
 
@@ -139,6 +151,14 @@ RX-KAI-015；届时 `FileSystemForecastCache` 可被 store 实现替换而不改
   只以 `spec.version` 为准，并折叠聚合版本；`_verify` 增加 metric/aggregation 版本的
   显式逐维比对。golden digest、`test_forecast_request.py` 的两个 golden hash 与
   `test_distribution.py` 的 `distribution_spec_hash` golden 同步更新。
+- 二次评审加固把 `FORECAST_ARTIFACT_KEY_VERSION` 升到 `forecast-artifact-key-v2`：
+  把 `origin_close`（P_0）纳入 key 与 `_verify`。上一轮虽把 P_0 落盘进 artifact，
+  但它未进 key、也未被 `_verify` 比对，因此同一 history 可能产生两个
+  「同 digest、不同 origin_close」的 artifact（连带收益/回撤/波动全部不同）且都被
+  静默接受——与 `future_sessions` / `distribution_spec_hash` 当初要堵的是同一类洞。
+  现在 key 从 history 末根 bar 派生 P_0，`_verify` 再逐维回比，`build_distribution`
+  若用了别的 P_0 会在落盘前显式失败。`ForecastResult` 同时强制 sample_id 连续升序
+  （§11 run 内 0-based 序号），原子写补父目录 `fsync` 以持久化 rename。
 - Benchmark / walk-forward 的成本曲线可归因：命中数 = 省下的推理次数。
 - artifact 身份错误从「结果悄悄变了」降级为「构造期显式失败」：key 少字段、模型
   identity 不全、provenance 未回填都会立刻报错。
