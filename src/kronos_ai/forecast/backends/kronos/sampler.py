@@ -43,7 +43,6 @@ lookback 窗口本身（逐窗口统计，§8）。
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from dataclasses import dataclass
 from datetime import date, datetime
 
 import numpy as np
@@ -62,57 +61,15 @@ from kronos_ai.errors import (
 )
 from kronos_ai.forecast.backends.kronos.rng import RunRNG
 from kronos_ai.forecast.backends.kronos.runtime import KronosRuntime
+from kronos_ai.forecast.base import require_aligned
 from kronos_ai.forecast.distribution import forecast_samples_from_raw
+from kronos_ai.forecast.raw import RawSampleSet
 
 FEATURE_NAMES: tuple[str, ...] = ("open", "high", "low", "close", "volume", "amount")
 TIME_FEATURE_NAMES: tuple[str, ...] = ("minute", "hour", "weekday", "day", "month")
 
 # 与上游 predict() 一致的归一化保护项；上游用 1e-5，不做更改
 NORM_EPS = 1e-5
-
-
-@dataclass(frozen=True)
-class RawSampleSet:
-    """一次采样的 raw samples（未做任何跨样本聚合）。
-
-    values 形状 = (sample_count, horizon, len(feature_names))，价格空间，float64。
-    未来时间轴由 future_sessions 给出（market session 序列，非个股 session）。
-    """
-
-    symbol: str
-    market_date: date
-    knowledge_cutoff: datetime
-    horizon: int
-    future_sessions: tuple[date, ...]
-    feature_names: tuple[str, ...]
-    values: np.ndarray
-
-    def __post_init__(self) -> None:
-        if self.values.ndim != 3:
-            raise ValueError(f"values must be 3-dimensional; got shape {self.values.shape}")
-        if self.values.dtype != np.float64:
-            raise ValueError(f"values must be float64; got {self.values.dtype}")
-        if not np.isfinite(self.values).all():
-            raise ValueError("values must be finite; non-finite samples indicate corrupt output")
-        if self.values.shape[1] != self.horizon:
-            raise ValueError(
-                f"values horizon {self.values.shape[1]} != declared horizon {self.horizon}"
-            )
-        if self.values.shape[2] != len(self.feature_names):
-            raise ValueError(
-                f"values feature width {self.values.shape[2]} != "
-                f"feature_names length {len(self.feature_names)}"
-            )
-        if self.values.shape[0] < 1:
-            raise ValueError("values must contain at least one sample")
-        if len(self.future_sessions) != self.horizon:
-            raise ValueError("future_sessions length must equal horizon")
-        # frozen dataclass 不阻止对 ndarray 的原地写入；置为只读，保证样本集不可变
-        self.values.flags.writeable = False
-
-    @property
-    def sample_count(self) -> int:
-        return int(self.values.shape[0])
 
 
 def assert_finite_samples(values: np.ndarray, *, symbol: str) -> None:
@@ -153,7 +110,7 @@ class KronosSampler:
 
     def decode_raw_samples(self, history: MarketHistory, request: ForecastRequest) -> RawSampleSet:
         """§10 截取点：sample 维 reshape 之后、mean 之前。"""
-        self._require_aligned(history, request)
+        require_aligned(history, request)
         # 上游 decode 窗口只含最后 max_context 个 token：horizon 超过窗口时未来段会被
         # 截断且与 future_sessions 错位，此处显式拒绝而非产出静默错位的样本。
         # 先于日历查询判定：配置错误不该依赖日历覆盖（也不该在缺日历时被掩盖）
@@ -211,23 +168,6 @@ class KronosSampler:
     @staticmethod
     def _session_close(day: date) -> datetime:
         return datetime.combine(day, MARKET_SESSION_CLOSE, tzinfo=CN_TZ)
-
-    def _require_aligned(self, history: MarketHistory, request: ForecastRequest) -> None:
-        if history.symbol != request.symbol:
-            raise ConfigurationError(
-                f"history symbol {history.symbol!r} != request symbol {request.symbol!r}"
-            )
-        if history.market_date != request.market_date:
-            raise ConfigurationError(
-                f"history market_date {history.market_date} != request market_date "
-                f"{request.market_date}"
-            )
-        if history.knowledge_cutoff != request.knowledge_cutoff:
-            raise ConfigurationError(
-                "history knowledge_cutoff "
-                f"{history.knowledge_cutoff.isoformat()} != request knowledge_cutoff "
-                f"{request.knowledge_cutoff.isoformat()}"
-            )
 
     def _lookback_window(self, history: MarketHistory) -> tuple[MarketBar, ...]:
         lookback = self._runtime.lookback_bars

@@ -2,7 +2,7 @@
 
 职责边界（§10/§12）：
 
-- ``forecast_samples_from_raw`` 把 :class:`~kronos_ai.forecast.backends.kronos.sampler.RawSampleSet`
+- ``forecast_samples_from_raw`` 把 :class:`~kronos_ai.forecast.raw.RawSampleSet`
   的 (sample_count, horizon, feature_count) 矩阵转成可持久化的 ForecastSample；
 - ``build_distribution`` 在 samples 之上计算 §13 的指标并组装 §12 的 ForecastDistribution。
 
@@ -39,7 +39,7 @@ from kronos_ai.domain.time import CN_TZ, MARKET_SESSION_CLOSE
 from kronos_ai.errors import ModelInferenceError
 
 if TYPE_CHECKING:
-    from kronos_ai.forecast.backends.kronos.sampler import RawSampleSet
+    from kronos_ai.forecast.raw import RawSampleSet
 
 DISTRIBUTION_SPEC_VERSION = "distribution-spec-v1"
 

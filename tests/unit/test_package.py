@@ -13,6 +13,7 @@ def test_phase1_subpackages_exist() -> None:
         "kronos_ai.data",
         "kronos_ai.forecast",
         "kronos_ai.forecast.backends.kronos",
+        "kronos_ai.evaluation",
         "kronos_ai.infrastructure.providers",
         "kronos_ai.infrastructure.persistence",
         "kronos_ai.cli",

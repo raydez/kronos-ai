@@ -11,6 +11,9 @@ sync core（§17 / §3.7），不要求本层 async。
   返回带完整 provenance 的 :class:`ForecastResult`；
 - 任何失败显式抛错（ADR-010），禁止 synthetic fallback；
 - 实现可以有额外的可选关键字参数（例如缓存 ``force``），但必须至少兼容本签名。
+
+前置条件校验（§17）集中在 :func:`require_aligned`：所有 backend 共用同一份
+history ↔ request 一致性检查，避免实现各自复制一份或悄悄放宽。
 """
 
 from __future__ import annotations
@@ -19,6 +22,30 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from kronos_ai.domain.forecast import ForecastRequest, ForecastResult
 from kronos_ai.domain.market import MarketHistory
+from kronos_ai.errors import ConfigurationError
+
+
+def require_aligned(history: MarketHistory, request: ForecastRequest) -> None:
+    """校验 §17 前置条件：history 与 request 的 symbol / market_date / knowledge_cutoff 一致。
+
+    这是「同一个研究时点」的定义，不是可选礼貌：三者不一致时 forecast 的输入与
+    声明的 origin 不对应，产物无法被审计。属于调用方 bug，显式失败（§3.2）。
+    """
+    if history.symbol != request.symbol:
+        raise ConfigurationError(
+            f"history symbol {history.symbol!r} != request symbol {request.symbol!r}"
+        )
+    if history.market_date != request.market_date:
+        raise ConfigurationError(
+            f"history market_date {history.market_date} != request market_date "
+            f"{request.market_date}"
+        )
+    if history.knowledge_cutoff != request.knowledge_cutoff:
+        raise ConfigurationError(
+            "history knowledge_cutoff "
+            f"{history.knowledge_cutoff.isoformat()} != request knowledge_cutoff "
+            f"{request.knowledge_cutoff.isoformat()}"
+        )
 
 
 @runtime_checkable
