@@ -12,9 +12,9 @@ knowledge_cutoff = 系统被允许使用信息的最晚时间（timezone-aware, 
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, BeforeValidator, field_validator, model_validator
 
 CN_UTC_OFFSET = timedelta(hours=8)
 CN_TZ = timezone(CN_UTC_OFFSET, "Asia/Shanghai")
@@ -36,6 +36,18 @@ def ensure_shanghai_aware(value: datetime, field: str) -> datetime:
     if offset != CN_UTC_OFFSET:
         raise ValueError(f"{field} must be Asia/Shanghai (+08:00), got offset {offset}")
     return value
+
+
+def _reject_datetime(value: Any) -> Any:
+    if isinstance(value, datetime):
+        raise ValueError(f"must be a date, not datetime: {value.isoformat()}")
+    return value
+
+
+#: session 日期字段（``datetime`` 是 ``date`` 的子类）：显式拒绝 datetime 而不是静默
+#: ``.date()`` 截断（ADR-009 §3）。误传 ``MarketBar.timestamp`` 会让 forecast 时间轴与
+#: label 时间轴错位，而这正是 v1 的 bug 类型之一。
+SessionDate = Annotated[date, BeforeValidator(_reject_datetime)]
 
 
 def _shanghai_combine(day: date, moment: time) -> datetime:

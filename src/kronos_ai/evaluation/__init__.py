@@ -4,7 +4,9 @@
 分离：
 
 - :mod:`kronos_ai.evaluation.baselines`：naive baselines（§19），已落地（RX-KAI-016）
-- ``dataset.py`` / ``walk_forward.py``：walk-forward 数据集（§27、§28，RX-KAI-017）
+- :mod:`kronos_ai.evaluation.walk_forward`：分段与 embargo 空置（§27、§29），已落地（RX-KAI-017）
+- :mod:`kronos_ai.evaluation.dataset`：LabelPolicy / walk-forward dataset / label 构造
+  （§27、§28，已落地 RX-KAI-017）
 - ``forecast_metrics.py`` / ``compute_metrics.py``：指标与聚合（§13、§49，RX-KAI-019）
 - ``report.py``：benchmark 报告（§48、§49）
 

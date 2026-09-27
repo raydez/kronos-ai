@@ -31,10 +31,29 @@ valid bar 的构造性判定在 Provider 层执行（RX-KAI-004）：停牌行�
 
 ```text
 horizon 内某个 market session 无 valid bar   → SUSPENDED
-horizon 越过日历 coverage 或数据末端         → INSUFFICIENT_FUTURE_BARS
+horizon 越过数据末端（data_coverage_end）    → INSUFFICIENT_FUTURE_BARS
 ```
 
 禁止静默向后延长 horizon；个股停牌不改变 forecast 时间轴（§11）。
+
+「日历 coverage 不足」与「数据末端」是两个不同口径（RX-KAI-017 澄清）：
+
+- **日历 coverage 不足**：`calendar.next_sessions(origin, horizon)` 无法给出 horizon 个
+  session。这是构建期错误，整个 dataset 构建直接抛 `CalendarError`（§3），不会产生
+  一个部分样本。
+- **数据末端**（`INSUFFICIENT_FUTURE_BARS`）：日历知道那些 session，但 provider 发布的
+  数据还没有到那里。按单个 label 标记，不使构建失败。
+
+落地（RX-KAI-017，`src/kronos_ai/evaluation/dataset.py`）：三态显式取值为
+`LABELED` / `SUSPENDED` / `INSUFFICIENT_FUTURE_BARS`，非 `LABELED` 的 label 不带
+收益与方向（不用 0 收益冒充「证据不足」）。判定优先级：窗口越过
+`data_coverage_end` → `INSUFFICIENT_FUTURE_BARS`；窗口内有 market session 无 valid bar
+（含 `trade_status="0"` 的停牌行）→ `SUSPENDED`。`data_coverage_end` 必须是**全局**
+口径（provider 已发布的最后一个 market session），不是「该个股最后一根 bar」：
+个股停牌与发布滞后只在全局口径下可区分（§29 的 label provenance）。label 窗口内出现
+`available_at <= origin.knowledge_cutoff` 的 bar 属 §29 泄漏，抛 `LeakageError`（该路径
+在正常数据下不可达，因为 `MarketBar` 保证 `available_at >= timestamp`；保留为
+defense-in-depth）。
 
 ### 3. 日历契约与覆盖范围
 
@@ -74,6 +93,10 @@ horizon 越过日历 coverage 或数据末端         → INSUFFICIENT_FUTURE_BA
 - `exchange` / `source` 为必填 provenance，不提供默认值：任何进入 artifact 的时间轴
   必须能回答「哪个日历、来自哪里」（§3.5）。BaoStock 装载器在 RX-KAI-006 结论之后
   落地，`source` 形如 `baostock:query_trade_dates-v1`。
+- RX-KAI-017 起，这两个字段同时是 `TradingCalendar` Protocol 的**只读属性**（纯增量
+  变更，`StaticTradingCalendar` 已结构化满足）：`build_walk_forward_dataset` 直接读
+  `calendar.exchange` / `calendar.source` 写入 `dataset_hash`（ADR-022 §5），
+  不再依赖 `getattr` 式的鸭子类型探测。
 
 ### 5. 停牌字段实测（RX-KAI-006 spike）
 
@@ -96,5 +119,7 @@ horizon 越过日历 coverage 或数据末端         → INSUFFICIENT_FUTURE_BA
 
 - Forecast / Label / Walk-forward / 停牌标记共享同一时间轴真源，`pandas` 工作日推导被禁止。
 - 日历覆盖不足、origin 非 session 等错误在生成阶段显式失败，不缺省向后延长。
+- 日历 `exchange` / `source` 进入 `dataset_hash` 与 Run Metadata，所以「同一批样本」
+  的含义包含「同一份日历 provenance」。
 - 真实日历接入前，任何基准结果必须能被识别出 `source` 为合成序列，避免被误读为
   真实交易日历结论。

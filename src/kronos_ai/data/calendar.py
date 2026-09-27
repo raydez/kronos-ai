@@ -39,8 +39,20 @@ Exchange = Literal["SSE", "SZSE", "BSE"]
 class TradingCalendar(Protocol):
     """§6.6 固定签名；签名变更属于契约变更。
 
-    实现须声明自己覆盖的 exchange 与 source（provenance，见 ADR-009）。
+    实现须声明自己覆盖的 exchange 与 source（provenance，见 ADR-009 §4）。这份
+    provenance 进入 walk-forward dataset_hash 与 Run Metadata（§32）：任何进 artifact
+    的时间轴都必须能回答「这是哪个日历、来自哪里」。
     """
+
+    @property
+    def exchange(self) -> Exchange:
+        """日历覆盖的交易所。"""
+        ...
+
+    @property
+    def source(self) -> str:
+        """日历来源标识，如 ``baostock:query_trade_dates-v1``。"""
+        ...
 
     def is_session(self, day: date) -> bool:
         """day 是否为覆盖范围内的 market session；范围外抛 CalendarError。"""

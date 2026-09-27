@@ -39,6 +39,15 @@ class CalendarError(KronosAIError):
     """Trading calendar failed, a date is outside coverage, or it is not a market session."""
 
 
+class LeakageError(KronosAIError):
+    """Future information leaked into an input window or a training segment (§29).
+
+    Distinct from DataQualityError: the data itself is valid, but the point-in-time
+    protocol (walk-forward split, embargo, knowledge cutoff) was violated. The caller
+    must not repair it by silently dropping samples — the dataset split is wrong.
+    """
+
+
 class ConfigurationError(KronosAIError):
     """Configuration is invalid or internally inconsistent (§32.1)."""
 
