@@ -14,8 +14,10 @@
 - :mod:`kronos_ai.evaluation.benchmark`：Forecast Benchmark v1 的 run 编排（§41，已落地
   RX-KAI-019）；契约见 ADR-023
 - :mod:`kronos_ai.evaluation.report`：§33 artifact 与人类可读报告（已落地 RX-KAI-019）
+- :mod:`kronos_ai.evaluation.gate`：Forecast Backend Go / Replace Gate（§19、§42，已落地
+  RX-KAI-020）；判据预注册、配对 bootstrap 区间与 GO / CONDITIONAL / REPLACE 判决，
+  契约见 ADR-024
 - ``decision_metrics.py`` / ``calibration_metrics.py``：决策层指标（§50，后续任务）
-- ``gate.py``：Forecast Backend Go / Replace Gate（§19、§42，后续任务 RX-KAI-020）
 
 依赖方向是单向的：``evaluation`` → ``forecast`` / ``data`` / ``domain``。因此 baseline
 可以复用推理层的接口、样本转换与缓存键，而推理核心不依赖任何评估代码。

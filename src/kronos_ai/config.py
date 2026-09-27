@@ -45,6 +45,7 @@ from kronos_ai.evaluation.dataset import (
     LabelPolicy,
     label_policy_from_experiment_config,
 )
+from kronos_ai.evaluation.gate import load_gate_criteria
 from kronos_ai.evaluation.regimes import DEFAULT_REGIME_SPEC, RegimeSpec
 from kronos_ai.evaluation.walk_forward import SegmentName, SegmentSpec, WalkForwardPlan
 
@@ -311,6 +312,37 @@ class DatasetSection(BaseModel):
         return payload
 
 
+class GateSection(BaseModel):
+    """§19 / §42 的 gate 预注册声明。
+
+    只声明**判据文档在哪**：判据本身是独立文档（:class:`~kronos_ai.evaluation.gate.GateCriteria`），
+    其 canonical hash 与原文随 run 归档。把路径而不是内容放进 config，是为了让
+    ``config_hash`` 只依赖 config 自身（判据的内容身份由 ``gate_criteria_hash`` 承担，
+    两者在 run metadata 里都在），同时「这次 run 用的是哪份判据」仍可从 config 读出。
+
+    ``criteria_file`` 相对**本 config 所在目录**解析，因此 ``configs/`` 里的一组文件可以
+    整体搬动而不失效。
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    criteria_file: str
+
+    @field_validator("criteria_file")
+    @classmethod
+    def _nonempty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("gate.criteria_file must be non-empty")
+        return value.strip()
+
+    def hashing_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"criteria_file": self.criteria_file}
+        assert set(payload) == set(type(self).model_fields), (
+            "GateSection.hashing_payload must cover every model field"
+        )
+        return payload
+
+
 class BenchmarkSection(BaseModel):
     """§48/§49 的 benchmark 声明：比较哪些 backend、是否 pilot 截断。"""
 
@@ -357,6 +389,8 @@ class ExperimentConfig(BaseModel):
     dataset: DatasetSection
     benchmark: BenchmarkSection
     regime: RegimeSpec = DEFAULT_REGIME_SPEC
+    #: §42 的 gate 预注册声明；缺省表示这次 run 不判决（判决产物直接缺席，不留假结论）。
+    gate: GateSection | None = None
 
     @field_validator("version")
     @classmethod
@@ -414,6 +448,7 @@ class ExperimentConfig(BaseModel):
             "dataset": self.dataset.hashing_payload(),
             "benchmark": self.benchmark.hashing_payload(),
             "regime": self.regime.hashing_payload(),
+            "gate": None if self.gate is None else self.gate.hashing_payload(),
         }
         assert set(payload) == set(type(self).model_fields), (
             "ExperimentConfig.hashing_payload must cover every model field"
@@ -426,11 +461,21 @@ class ExperimentConfig(BaseModel):
         return sha256_hex(self.hashing_payload())
 
 
+def gate_criteria_path(config: ExperimentConfig, config_path: Path | str) -> Path | None:
+    """``gate.criteria_file`` 解析成绝对路径（相对 config 所在目录）；未声明返回 ``None``。"""
+    if config.gate is None:
+        return None
+    return (Path(config_path).resolve().parent / config.gate.criteria_file).resolve()
+
+
 def load_experiment_config(path: Path | str) -> tuple[ExperimentConfig, str]:
     """读取 YAML experiment config，返回 ``(config, raw_text)``。
 
     ``raw_text`` 会随 run 原样归档（§32.1）；config_hash 由其**语义**派生，因此注释与
     键顺序的变化不会换 hash，而任何字段变化都会。
+
+    声明了 ``gate`` 时，判据文档必须存在且合法——**在 run 开始之前**（§42 的预注册：
+    缺失的判据不允许「先跑再补」）。
     """
     config_path = Path(path)
     if not config_path.is_file():
@@ -456,6 +501,33 @@ def load_experiment_config(path: Path | str) -> tuple[ExperimentConfig, str]:
         raise
     except Exception as exc:  # pydantic ValidationError 等
         raise ConfigurationError(f"invalid experiment config {config_path}: {exc}") from exc
+    criteria_path = gate_criteria_path(config, config_path)
+    if criteria_path is not None:
+        # 预注册：判据必须在 run 前可读、自洽，且**指向本次 run 真的会跑的 backend 与段**。
+        # 这两件事在这里校验一次；取对象由调用方（CLI）再调同一个 load_gate_criteria——
+        # 两次读之间文件被替换时，归档与判决都用第二次读到的内容（即「校验的」可能是 A、
+        # 「归档的」是 B，窗口只有毫秒级，见 ADR-024 §9 的 defer）。
+        criteria, _raw = load_gate_criteria(criteria_path)
+        unknown_backends = sorted(
+            {criteria.candidate, *criteria.baselines} - set(config.benchmark.backends)
+        )
+        if unknown_backends:
+            raise ConfigurationError(
+                f"gate criteria {criteria_path} names backends {unknown_backends} that this "
+                f"config's benchmark.backends {list(config.benchmark.backends)} do not include; "
+                "judging a backend that will not run is not a comparison, and spending the run "
+                "before noticing it is worse"
+            )
+        unknown_segments = sorted(
+            set(criteria.evidence_segments) - {segment.name for segment in config.dataset.segments}
+        )
+        if unknown_segments:
+            raise ConfigurationError(
+                f"gate criteria {criteria_path} counts segments {unknown_segments} as evidence "
+                f"but this config's dataset.segments are "
+                f"{[segment.name for segment in config.dataset.segments]}; the judgement would "
+                "silently rest on a different evidence slice than the pre-registered one"
+            )
     return config, raw_text
 
 
@@ -468,9 +540,11 @@ __all__ = [
     "EvaluationSection",
     "ExperimentConfig",
     "ForecastSection",
+    "GateSection",
     "RuntimeSection",
     "SamplingSection",
     "SegmentSection",
     "UniverseSection",
+    "gate_criteria_path",
     "load_experiment_config",
 ]

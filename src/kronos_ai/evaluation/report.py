@@ -20,10 +20,16 @@ from __future__ import annotations
 from typing import Any
 
 from kronos_ai.domain.hashing import sha256_hex
+from kronos_ai.errors import ConfigurationError
 from kronos_ai.evaluation.benchmark import ForecastBenchmarkResult, evaluated_origins_by_symbol
 from kronos_ai.evaluation.compute_metrics import percentile
 from kronos_ai.evaluation.forecast_metrics import ForecastEvalMetrics
-from kronos_ai.infrastructure.persistence.artifact_store import ArtifactRecord, ArtifactStore
+from kronos_ai.evaluation.gate import GateVerdict, gate_payload, render_gate_markdown
+from kronos_ai.infrastructure.persistence.artifact_store import (
+    MEDIA_TYPE_YAML,
+    ArtifactRecord,
+    ArtifactStore,
+)
 
 BENCHMARK_REPORT_VERSION = "forecast-benchmark-report-v1"
 
@@ -163,8 +169,13 @@ def render_markdown_report(
     result: ForecastBenchmarkResult,
     *,
     metadata: dict[str, Any] | None = None,
+    gate: GateVerdict | None = None,
 ) -> str:
-    """渲染 §48/§49 的人类可读报告（``report.md``）。"""
+    """渲染 §48/§49 的人类可读报告（``report.md``）。
+
+    ``gate`` 为 ``None`` 时**不写** Gate 段落：没做判决的 run 不留一个空标题让人以为
+    「判决过、结论是空白」（§42 的判决要么有、要么明确缺席）。
+    """
     meta = metadata or {}
     lines: list[str] = [
         "# Forecast Benchmark v1",
@@ -226,6 +237,8 @@ def render_markdown_report(
         "（口径见 `deferred_compute_metrics`，不是「测出来是 0」）。",
         "",
     ]
+    if gate is not None:
+        lines += render_gate_markdown(gate)
     return "\n".join(lines)
 
 
@@ -236,18 +249,30 @@ def write_forecast_benchmark_artifacts(
     result: ForecastBenchmarkResult,
     metadata: dict[str, Any],
     config_text: str,
+    gate: GateVerdict | None = None,
+    gate_criteria_text: str | None = None,
 ) -> tuple[ArtifactRecord, ...]:
     """把一次 benchmark run 的产物写入 §33 的 run 目录。
 
     写入顺序无关紧要（每个文件都原子落盘 + 单独登记），但内容必须与 ``metadata`` 里的
     hash 一致：``report_hash`` / ``dataset_hash`` / ``config_hash`` 都能在 artifact 里
     找到对应实体。
+
+    ``gate`` / ``gate_criteria_text`` 必须**同时**给出或同时缺席（§42 的预注册：
+    判决与它依据的判据原文住在一起，事后替换判据必然与 ``criteria_hash`` 对不上）。
     """
     import pandas as pd
 
+    if (gate is None) != (gate_criteria_text is None):
+        raise ConfigurationError(
+            "gate verdict and gate criteria text must be archived together: a verdict without "
+            "its pre-registered criteria cannot be re-checked (§42)"
+        )
     written: list[ArtifactRecord] = []
     written.append(
-        store.write_text(run_id, "report", render_markdown_report(result, metadata=metadata))
+        store.write_text(
+            run_id, "report", render_markdown_report(result, metadata=metadata, gate=gate)
+        )
     )
     written.append(store.write_json(run_id, "metrics", metrics_payload(result)))
     written.append(store.write_json(run_id, "metadata", metadata))
@@ -260,6 +285,18 @@ def write_forecast_benchmark_artifacts(
     )
     frame = pd.DataFrame(records_frame_payload(result))
     written.append(store.write_parquet(run_id, "forecast", frame))
+    if gate is not None:
+        assert gate_criteria_text is not None
+        written.append(
+            store.write_bytes(
+                run_id,
+                "gate_criteria",
+                gate_criteria_text.encode("utf-8"),
+                filename="gate_criteria.yaml",
+                media_type=MEDIA_TYPE_YAML,
+            )
+        )
+        written.append(store.write_json(run_id, "gate", gate_payload(gate)))
     return tuple(written)
 
 

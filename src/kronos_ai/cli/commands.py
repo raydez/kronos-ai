@@ -29,13 +29,20 @@ from kronos_ai.cli.format import (
     sampling_from_args,
     write_forecast_result,
 )
-from kronos_ai.config import ExperimentConfig, load_experiment_config
+from kronos_ai.config import ExperimentConfig, gate_criteria_path, load_experiment_config
 from kronos_ai.domain.run import RunStatus
 from kronos_ai.domain.time import CN_TZ, resolve_knowledge_cutoff
 from kronos_ai.errors import ArtifactError
 from kronos_ai.evaluation.benchmark import (
     build_benchmark_run_metadata,
     run_forecast_benchmark,
+)
+from kronos_ai.evaluation.gate import (
+    GateCriteria,
+    evaluate_gate,
+    gate_payload,
+    load_gate_criteria,
+    summarise_gate,
 )
 from kronos_ai.evaluation.report import (
     metrics_payload,
@@ -211,10 +218,11 @@ def run_benchmark_forecast(
     *,
     context_factory: BenchmarkContextFactory = build_benchmark_context,
 ) -> int:
-    """``kronos-ai benchmark forecast --config <yaml>``（§34 / §41 / §49）。
+    """``kronos-ai benchmark forecast --config <yaml>``（§34 / §41 / §49 / §42）。
 
-    编排顺序：装载 config → 装配 context → **跑 benchmark** → 用结果建 metadata → 登记 run
-    → 落盘 artifact。run_id 只有在拿到结果后才分配，因此：
+    编排顺序：装载 config（含 gate 判据的预注册校验）→ 装配 context → **跑 benchmark**
+    → 按预注册判据做 gate 判决 → 用结果建 metadata → 登记 run → 落盘 artifact。
+    run_id 只有在拿到结果后才分配，因此：
 
     ```text
     benchmark 阶段失败（provider / backend / history 不足）→ 不留 run 记录（CLI 报错并退出 1）
@@ -224,8 +232,18 @@ def run_benchmark_forecast(
     这是刻意的：run 记录的身份由 ``dataset_hash`` / ``report_hash`` 定义，而这两个只有跑完才
     存在；一个没有结果的 run 没有可追溯的身份，把它登记成 ``failed`` 反而会让「run 目录」
     指向不存在的产物。中途失败的可见性由 CLI 的退出码与 stderr 承担。
+
+    config 声明了 ``gate`` 时，判据在**跑之前**就被读取并校验（§42 的预注册），判决随
+    artifact 归档（``gate.json`` + 判据原文）；证据不足会以
+    :class:`~kronos_ai.errors.InsufficientEvidenceError` 显式失败，而不是给出一个
+    看起来像结论的 REPLACE。
     """
     config, raw_text = load_experiment_config(args.config)
+    criteria_path = gate_criteria_path(config, args.config)
+    gate_criteria: GateCriteria | None = None
+    gate_criteria_text: str | None = None
+    if criteria_path is not None:
+        gate_criteria, gate_criteria_text = load_gate_criteria(criteria_path)
     context = context_factory(config, args)
     spec = config.benchmark_spec()
     result = run_forecast_benchmark(
@@ -236,6 +254,7 @@ def run_benchmark_forecast(
         spec=spec,
         sampling=config.sampling,
     )
+    gate = None if gate_criteria is None else evaluate_gate(result, gate_criteria)
 
     database, store, registry = _open_persistence(args)
     try:
@@ -248,6 +267,14 @@ def run_benchmark_forecast(
             adjustment=config.data.adjustment,
             backend_identities=context.backend_identities,
             environment=environment_info(),
+            extra=None
+            if gate is None
+            else {
+                "gate_criteria_version": gate.criteria_version,
+                "gate_criteria_hash": gate.criteria_hash,
+                "gate_verdict": gate.verdict,
+                "gate_hash": gate.gate_hash,
+            },
         )
         now = datetime.now(CN_TZ)
         registry.register(
@@ -270,6 +297,8 @@ def run_benchmark_forecast(
                 result=result,
                 metadata=metadata,
                 config_text=raw_text,
+                gate=gate,
+                gate_criteria_text=gate_criteria_text,
             )
         except Exception as exc:
             registry.update_status(
@@ -284,10 +313,13 @@ def run_benchmark_forecast(
                 "config_hash": config.config_hash,
                 "metadata": metadata,
                 "metrics": metrics_payload(result),
+                "gate": None if gate is None else gate_payload(gate),
             }
             print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
         else:
             print(format_benchmark_summary(result, run_id=run_id))
+            if gate is not None:
+                print(summarise_gate(gate))
     finally:
         database.close()
     return 0

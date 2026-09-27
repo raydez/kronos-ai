@@ -52,6 +52,17 @@ class ConfigurationError(KronosAIError):
     """Configuration is invalid or internally inconsistent (§32.1)."""
 
 
+class InsufficientEvidenceError(KronosAIError):
+    """There is not enough evidence to answer the question that was asked (§19 / §42).
+
+    Distinct from ConfigurationError (the setup is wrong) and from a negative result (the
+    evidence exists and does not support the claim): a Go / Replace verdict computed on too
+    few paired origins would read as "the candidate failed" when the truth is "we did not
+    test it" (ADR-010 in evaluation form). The caller must collect more evidence, not
+    loosen the pre-registered criteria.
+    """
+
+
 class ArtifactError(KronosAIError):
     """A stored artifact is missing, corrupt, or inconsistent with its cache key.
 

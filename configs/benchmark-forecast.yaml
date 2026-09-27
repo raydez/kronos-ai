@@ -85,3 +85,14 @@ benchmark:
   # 本示例不截断（下面注释掉 = 跑满），需要快速 pilot 时再打开；把值设得比
   # considered_origins 还大是不需要截断的噪音。
   # origin_limit: 50
+
+# §19 / §42 的 Go / Replace Gate 判据（预注册）：本文件指向判据文档，路径相对本 config
+# 所在目录解析。声明了 gate 之后：
+# - 判据在 run **之前**被读取并校验（缺失 / 非法 / 不可满足即拒绝启动）；
+# - 判据原文 + canonical hash + 判决一起随 run 归档（artifact ``gate_criteria`` / ``gate``
+#   与 metadata 的 gate_criteria_hash / gate_verdict / gate_hash）；
+# - 证据不足会让 run 显式失败（InsufficientEvidenceError），不会给出一个看起来像结论的
+#   REPLACE。
+# 不声明 gate 段 = 这次 run 不做判决（判决产物缺席，而不是留一个空结论）。
+gate:
+  criteria_file: gate-criteria-forecast-v1.yaml

@@ -1,0 +1,92 @@
+# Forecast Backend Go / Replace Gate 判据（§19 / §42；ADR-024）
+#
+# 用途：
+#   kronos-ai benchmark forecast --config configs/benchmark-forecast.yaml
+#   （config 的 gate.criteria_file 指向本文件；本文件必须在该 run 之前存在且自洽——
+#     加载即校验，缺少判据的 run 不允许启动）
+#
+# 这份判据是**判据形态 + 本次窗口下的取值**，随 run 原样归档（artifact ``gate_criteria``）
+# 并给出 canonical hash（``criteria_hash``，进 run metadata 与 ``gate.json``）。
+# 改动本文件的任何字段都会换掉 criteria_hash：事后放宽阈值 / 换指标 / 换比较对象 / 换
+# **证据切片**都是**可见**的（§42 禁止「跑完后从多个指标中挑选有利指标」「事后放宽阈值」）。
+#
+# 判决规则（gate.py 的模块 docstring 是完整定义，GateVerdict 会复核这条规则）：
+#   GO          整体增量 CI 下界 > 0 且 >= 3 个 trend 分组下界 > 0 且 compute 在护栏内
+#   CONDITIONAL 整体下界 > 0 或 >= 1 个分组下界 > 0（其余情形）
+#   REPLACE     整体下界 <= 0 且没有任何分组下界 > 0；且本次 run 的分组证据足够判决
+#               （否则抛 InsufficientEvidenceError，见下）
+# 配对样本数低于门槛时不判决，而是显式失败（InsufficientEvidenceError）：缺证据不是
+# 「表现更差」。
+#
+# 注意：本示例窗口（configs/benchmark-forecast.yaml）下的门槛取值是为了让示例可跑通而设的
+# **示例值**，不构成任何研究结论；正式 Phase 2 run 必须在 run 之前把取值按目标 universe /
+# 窗口冻结下来。
+#
+# 重新预注册记录（RX-KAI-020 返修）：本判据的第一版**没有**冻结证据切片（即当时还不存在
+# evidence_segments 字段，实现把 train + test 池化），评审指出「哪些 origin 算证据」至少和
+# 分组方式一样是承重的判据形态（实测：test 段 BEAR 只有 3 个 origin，池化后有 5 个，判决
+# 会随切片变化）。因此本文件在正式 run 之前重新预注册，改了三件事：
+#   1) 冻结证据切片为 test（理由如上）；
+#   2) 主判据指标 direction_accuracy → mae（理由见下面的 metric 注释：本窗口下前者没有
+#      分辨力，多个 backend 精确并列）；
+#   3) 分组门槛 5 → 3，按 test 段的证据量（整体门槛 32 两版未变）。
+# 第 2 项是看过本窗口的**指标分辨力**之后才定的（那不是「模型表现」，但也确实不是纯证据量
+# 推理），这一点如实写在这里，避免读成「整次重注册都没看数据」。第一版判据只在示例窗口上
+# 被跑过一次，那次判决不作结论；据此得到的任何数字都不作结论。
+
+version: forecast-gate-criteria-v1
+
+# 被判定的 backend
+candidate: kronos
+
+# 唯一主判据指标（允许：direction_accuracy / mae / rmse；方向由白名单给出，
+# 增量统一为「正数 = 候选更好」）
+#
+# 这里用 mae 而不是方向准确率：本窗口下 Kronos 的采样中位数常常落在「无方向」附近，
+# direction_accuracy 会退化成多个 baseline 的**同一个数字**（并列），于是「最强 baseline」
+# 由并列打破规则（字典序）决定——那是实现细节，不是研究结论。mae 是连续量，每条 LABELED
+# 记录都有取值，本窗口下可判且不受并列影响。
+metric: mae
+
+# 比较对象集合：判据说「相对最强 statistical baseline」，「最强」由本次 run 的**同一指标**
+# 在 evidence_segments 这批段上选出（按每个 baseline 自己在该段里的 LABELED 记录聚合；
+# 与候选的配对是判决与区间的口径）。集合必须在 run 前定下，否则「最强的那个」可以跑完再挑。
+baselines:
+  - last_value
+  - drift
+  - moving_average
+  - ar1
+baseline_selection: strongest
+
+# 分组轴（trend 有 3 个取值，volatility 只有 2 个）
+grouping_axis: trend
+min_groups_with_positive_increment: 3
+
+# 哪些段的 origin 算证据（必填）。本示例只看 test 段：正式结论必须建立在样本外段上，
+# train 段的数字只能用于诊断。
+evidence_segments:
+  - test
+
+# 门槛取值来源（attestation）：本窗口 test 段共 32 个 origin，trend 轴上
+# BEAR 3 / SIDEWAYS 13 / BULL 16，因此逐分组门槛取**最小分组**的 3、整体门槛取 32。
+# 这一步必须在正式 run 之前做完，且只看**证据量**、不看模型表现——否则就是 §42 禁止的
+# 「事后挑指标 / 放宽阈值」。
+# 诚实说明：这个「先看过证据量」的结论在本仓库里**没有独立痕迹**（不保存 run 前的证据量
+# 探针产物），只能由判据作者声明；可核查的部分是——门槛与本次 run 的实际分组样本量一起
+# 写进 gate.json，读的人可以自己核对「门槛是不是贴着证据量定的」。
+# 若分组证据低于门槛，run 会显式失败（缺证据不是结论），因此窗口漂移必须先重定判据，
+# 而不是让判决静默变成 InsufficientEvidenceError。
+min_paired_samples_per_group: 3
+min_paired_samples_overall: 32
+
+confidence_level: 0.95
+bootstrap_iterations: 2000
+bootstrap_seed: 20260927
+
+# §19 的 compute cost 维度：候选 backend 每个 origin 的平均墙钟秒数上限。
+# 这是「还值得当默认 backend 吗」的护栏，不是 §16 cost probe 的可行性预算
+# （后者回答「这台机器跑不跑得完」，口径见 ADR-019）。
+# 口径：观测值是候选在**本次 run 全部段**（不只 evidence_segments）的每条记录平均耗时——
+# 代价是 backend 的属性，与判决看哪一段无关。因此同一个判决里「指标数证据切片、compute
+# 数整次 run」是有意的（ADR-024 §5）。
+max_seconds_per_origin: 2.5

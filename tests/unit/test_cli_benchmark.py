@@ -166,33 +166,70 @@ def make_context(config: ExperimentConfig) -> BenchmarkContext:
 
 
 def write_config(
-    tmp_path: Path, *, backends: str = "[last_value]", adjustment: str = "raw"
+    tmp_path: Path,
+    *,
+    backends: str = "[last_value]",
+    adjustment: str = "raw",
+    gate: str | None = None,
 ) -> Path:
     path = tmp_path / "benchmark.yaml"
+    lines = [
+        "version: experiment-config-v1",
+        "data:",
+        f"  adjustment: {adjustment}",
+        "forecast:",
+        "  backend: kronos",
+        f"  lookback_bars: {LOOKBACK}",
+        "  sampling: {seed: 11, sample_count: 4}",
+        "dataset:",
+        # symbol 必须带引号：YAML 里 600000 会被解析成 int，config 显式拒绝
+        f'  symbols: ["{SYMBOL}"]',
+        f"  start_session: {WINDOW[0].isoformat()}",
+        f"  end_session: {WINDOW[-1].isoformat()}",
+        "  segments:",
+        "    - {name: train, length_sessions: 2}",
+        "    - {name: test, length_sessions: 2}",
+        "benchmark:",
+        f"  backends: {backends}",
+        # regime 窗口必须 <= lookback，否则 runner 显式拒绝（不静默用更短窗口）
+        "regime:",
+        "  trend_window_sessions: 5",
+        "  volatility_window_sessions: 5",
+    ]
+    if gate is not None:
+        lines += ["gate:", f"  criteria_file: {gate}"]
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def write_criteria(
+    tmp_path: Path,
+    *,
+    candidate: str = "last_value",
+    baselines: str = "[drift]",
+    name: str = "gate.yaml",
+    metric: str = "direction_accuracy",
+    min_groups: int = 1,
+    evidence_segments: str = "[test]",
+) -> Path:
+    """写一份能被 fixture 的 test 段（2 个 origin）满足的判据（门槛按该段规模设定）。"""
+    path = tmp_path / name
     path.write_text(
         "\n".join(
             [
-                "version: experiment-config-v1",
-                "data:",
-                f"  adjustment: {adjustment}",
-                "forecast:",
-                "  backend: kronos",
-                f"  lookback_bars: {LOOKBACK}",
-                "  sampling: {seed: 11, sample_count: 4}",
-                "dataset:",
-                # symbol 必须带引号：YAML 里 600000 会被解析成 int，config 显式拒绝
-                f'  symbols: ["{SYMBOL}"]',
-                f"  start_session: {WINDOW[0].isoformat()}",
-                f"  end_session: {WINDOW[-1].isoformat()}",
-                "  segments:",
-                "    - {name: train, length_sessions: 2}",
-                "    - {name: test, length_sessions: 2}",
-                "benchmark:",
-                f"  backends: {backends}",
-                # regime 窗口必须 <= lookback，否则 runner 显式拒绝（不静默用更短窗口）
-                "regime:",
-                "  trend_window_sessions: 5",
-                "  volatility_window_sessions: 5",
+                "version: forecast-gate-criteria-v1",
+                f"candidate: {candidate}",
+                f"metric: {metric}",
+                f"baselines: {baselines}",
+                "grouping_axis: trend",
+                f"evidence_segments: {evidence_segments}",
+                f"min_groups_with_positive_increment: {min_groups}",
+                "min_paired_samples_per_group: 2",
+                "min_paired_samples_overall: 2",
+                "confidence_level: 0.95",
+                "bootstrap_iterations: 200",
+                "bootstrap_seed: 7",
+                "max_seconds_per_origin: 60.0",
                 "",
             ]
         ),
@@ -350,6 +387,135 @@ def test_config_secret_is_rejected_before_any_run(tmp_path: Path) -> None:
     with pytest.raises(Exception, match="secret"):
         commands.run_benchmark_forecast(args, context_factory=lambda cfg, _a: make_context(cfg))
     assert not (tmp_path / "artifacts" / "index.sqlite3").exists()
+
+
+# ---------------------------------------------------------------------------
+# Gate（§19 / §42）：判据预注册、判决归档、缺判据即拒绝运行
+# ---------------------------------------------------------------------------
+
+
+def test_gate_verdict_and_criteria_are_archived_with_the_run(tmp_path: Path) -> None:
+    """判据原文 + canonical hash + 判决一起随 run 归档（§42 的预注册形式）。"""
+    criteria_path = write_criteria(tmp_path)
+    config_path = write_config(tmp_path, backends="[last_value, drift]", gate=criteria_path.name)
+    args = benchmark_args(tmp_path, config_path)
+
+    assert (
+        commands.run_benchmark_forecast(args, context_factory=lambda cfg, _a: make_context(cfg))
+        == 0
+    )
+
+    from kronos_ai.evaluation.gate import load_gate_criteria
+    from kronos_ai.infrastructure.persistence.artifact_store import ArtifactStore
+
+    criteria, raw_text = load_gate_criteria(criteria_path)
+    database = open_database(tmp_path / "artifacts" / "index.sqlite3")
+    try:
+        registry = RunRegistry(database)
+        record = registry.list_runs(kind="benchmark_forecast")[0]
+        store = ArtifactStore(tmp_path / "artifacts", database)
+        names = {item.name for item in store.list_artifacts(record.run_id)}
+        gate = store.read_json(record.run_id, "gate")
+        stored_criteria = store.read_bytes(record.run_id, "gate_criteria").decode("utf-8")
+        report = store.artifact_path(record.run_id, "report").read_text(encoding="utf-8")
+    finally:
+        database.close()
+
+    assert names == {"report", "metrics", "metadata", "config", "forecast", "gate", "gate_criteria"}
+    # 判据：归档原文就是当时那份文件，hash 是它的 canonical hash
+    assert stored_criteria == raw_text
+    assert record.metadata["gate_criteria_hash"] == criteria.criteria_hash
+    assert record.metadata["gate_criteria_version"] == criteria.version
+    # 判决：绑定判据与被判定的结论
+    assert gate["criteria_hash"] == criteria.criteria_hash
+    assert gate["report_hash"] == record.metadata["report_hash"]
+    assert gate["verdict"] in {"GO", "CONDITIONAL", "REPLACE"}
+    assert gate["candidate"] == "last_value"
+    assert gate["strongest_baseline"] == "drift"
+    # 判决覆盖的段随判决一起归档：读者不必回到判据文件才知道数的是哪些 origin
+    assert gate["evidence_segments"] == ["test"]
+    assert record.metadata["gate_verdict"] == gate["verdict"]
+    assert record.metadata["gate_hash"] == gate["gate_hash"]
+    assert gate["gate_hash"] == record.metadata["gate_hash"]
+    # 报告里能看到判决与它依据的判据 hash
+    assert "## §19 / §42 Gate — Go / Replace" in report
+    assert criteria.criteria_hash in report
+
+
+def test_gate_verdict_reaches_json_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    criteria_path = write_criteria(tmp_path)
+    config_path = write_config(tmp_path, backends="[last_value, drift]", gate=criteria_path.name)
+    args = benchmark_args(tmp_path, config_path, as_json=True)
+    assert (
+        commands.run_benchmark_forecast(args, context_factory=lambda cfg, _a: make_context(cfg))
+        == 0
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["gate"]["verdict"] == payload["metadata"]["gate_verdict"]
+    assert payload["gate"]["criteria_hash"] == payload["metadata"]["gate_criteria_hash"]
+
+
+def test_run_without_gate_declaration_has_no_gate_artifacts(tmp_path: Path) -> None:
+    """没声明判据的 run 不留判决产物：缺席要明确，而不是留一个空结论。"""
+    config_path = write_config(tmp_path)
+    args = benchmark_args(tmp_path, config_path)
+    commands.run_benchmark_forecast(args, context_factory=lambda cfg, _a: make_context(cfg))
+
+    from kronos_ai.infrastructure.persistence.artifact_store import ArtifactStore
+
+    database = open_database(tmp_path / "artifacts" / "index.sqlite3")
+    try:
+        record = RunRegistry(database).list_runs(kind="benchmark_forecast")[0]
+        store = ArtifactStore(tmp_path / "artifacts", database)
+        names = {item.name for item in store.list_artifacts(record.run_id)}
+    finally:
+        database.close()
+    assert names == {"report", "metrics", "metadata", "config", "forecast"}
+    assert "gate_verdict" not in record.metadata
+    assert "gate_criteria_hash" not in record.metadata
+
+
+def test_missing_gate_criteria_blocks_the_run_before_it_starts(tmp_path: Path) -> None:
+    config_path = write_config(tmp_path, gate="does-not-exist.yaml")
+    args = benchmark_args(tmp_path, config_path)
+    with pytest.raises(ConfigurationError, match="gate criteria not found"):
+        commands.run_benchmark_forecast(args, context_factory=lambda cfg, _a: make_context(cfg))
+    assert not (tmp_path / "artifacts" / "index.sqlite3").exists()
+
+
+def test_gate_criteria_naming_a_backend_outside_the_run_blocks_the_run(tmp_path: Path) -> None:
+    """判据指向本次 run 不会跑的 backend：在跑之前就拒绝，而不是跑完才失败。"""
+    criteria_path = write_criteria(tmp_path, candidate="kronos", baselines="[last_value]")
+    config_path = write_config(tmp_path, gate=criteria_path.name)
+    args = benchmark_args(tmp_path, config_path)
+    with pytest.raises(ConfigurationError, match="do not include"):
+        commands.run_benchmark_forecast(args, context_factory=lambda cfg, _a: make_context(cfg))
+    assert not (tmp_path / "artifacts" / "index.sqlite3").exists()
+
+
+def test_gate_criteria_naming_a_segment_outside_the_dataset_blocks_the_run(tmp_path: Path) -> None:
+    """判据把 dataset 里没有的段当证据：在跑之前就拒绝（否则判决会数另一批 origin）。"""
+    criteria_path = write_criteria(tmp_path, evidence_segments="[validation]")
+    config_path = write_config(tmp_path, backends="[last_value, drift]", gate=criteria_path.name)
+    args = benchmark_args(tmp_path, config_path)
+    with pytest.raises(ConfigurationError, match="counts segments"):
+        commands.run_benchmark_forecast(args, context_factory=lambda cfg, _a: make_context(cfg))
+    assert not (tmp_path / "artifacts" / "index.sqlite3").exists()
+
+
+def test_gate_criteria_file_is_resolved_relative_to_the_config(tmp_path: Path) -> None:
+    """判据路径相对 config 所在目录解析：configs/ 里的一组文件可以整体搬动。"""
+    configs = tmp_path / "configs"
+    configs.mkdir()
+    criteria_path = write_criteria(configs, name="criteria.yaml")
+    config_path = write_config(configs, backends="[last_value, drift]", gate=criteria_path.name)
+    args = benchmark_args(tmp_path, config_path)
+    assert (
+        commands.run_benchmark_forecast(args, context_factory=lambda cfg, _a: make_context(cfg))
+        == 0
+    )
 
 
 # ---------------------------------------------------------------------------
