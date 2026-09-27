@@ -33,6 +33,7 @@ from kronos_ai.domain.forecast import (
     ThresholdOperator,
     ThresholdProbability,
 )
+from kronos_ai.domain.hashing import sha256_hex
 from kronos_ai.domain.time import CN_TZ, MARKET_SESSION_CLOSE
 from kronos_ai.errors import ModelInferenceError
 
@@ -87,6 +88,28 @@ class DistributionSpec(BaseModel):
             raise ValueError("quantiles contains duplicate (metric, quantile)")
         return self
 
+    def hashing_payload(self) -> dict[str, object]:
+        """进入 ``distribution_spec_hash`` 的规范 payload。
+
+        spec（阈值/分位）决定 ForecastDistribution 的字段取值，因此它是 forecast
+        身份的一部分：同一 key 复用一条用不同 spec 算出的分布属静默错误产物。
+        显式展开每个字段，不依赖声明顺序。
+        """
+        return {
+            "spec_version": self.version,
+            "thresholds": [
+                {
+                    "metric": t.metric,
+                    "operator": t.operator,
+                    "threshold": t.threshold,
+                }
+                for t in self.thresholds
+            ],
+            "quantiles": [
+                {"metric": q.metric, "quantile": q.quantile} for q in self.quantiles
+            ],
+        }
+
 
 DEFAULT_DISTRIBUTION_SPEC = DistributionSpec(
     thresholds=(
@@ -100,6 +123,22 @@ DEFAULT_DISTRIBUTION_SPEC = DistributionSpec(
         for q in (0.05, 0.25, 0.5, 0.75, 0.95)
     ),
 )
+
+
+def distribution_spec_hash(spec: DistributionSpec = DEFAULT_DISTRIBUTION_SPEC) -> str:
+    """DistributionSpec 的确定性 hash（进 ForecastArtifactKey 与 ForecastDistribution）。
+
+    同时折叠 ``FORECAST_METRIC_REGISTRY_VERSION``：指标数学定义变化会改变分布取值，
+    必须让旧 artifact 失效（§12/§15）。
+    """
+    return sha256_hex(
+        {
+            "kind": "distribution_spec",
+            "distribution_spec_version": DISTRIBUTION_SPEC_VERSION,
+            "metric_definition_version": FORECAST_METRIC_REGISTRY_VERSION,
+            "spec": spec.hashing_payload(),
+        }
+    )
 
 
 def forecast_samples_from_raw(raw: RawSampleSet) -> tuple[ForecastSample, ...]:
@@ -178,6 +217,7 @@ def build_distribution(
         expected_max_drawdown=float(metrics["max_drawdown"].mean()),
         expected_path_volatility=float(metrics["path_volatility"].mean()),
         distribution_spec_version=spec.version,
+        distribution_spec_hash=distribution_spec_hash(spec),
         metric_definition_version=FORECAST_METRIC_REGISTRY_VERSION,
     )
 

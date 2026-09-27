@@ -41,3 +41,11 @@ class CalendarError(KronosAIError):
 
 class ConfigurationError(KronosAIError):
     """Configuration is invalid or internally inconsistent (§32.1)."""
+
+
+class ArtifactError(KronosAIError):
+    """A stored artifact is missing, corrupt, or inconsistent with its cache key.
+
+    Distinct from ModelInferenceError: the failure is in persisted state, and the
+    caller must not silently fall back to re-inference or synthesized content (§3.2).
+    """

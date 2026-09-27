@@ -25,6 +25,7 @@ MD = date(2026, 9, 25)
 CUTOFF = datetime(2026, 9, 25, 18, 0, tzinfo=CN_TZ)
 CLOSE_TS = datetime(2026, 9, 28, 15, 0, tzinfo=CN_TZ)
 HASH = "a" * 64
+SPEC_HASH = "c" * 64
 
 
 def point(**overrides: object) -> ForecastPoint:
@@ -61,6 +62,7 @@ def distribution(**overrides: object) -> ForecastDistribution:
         "expected_max_drawdown": -0.05,
         "expected_path_volatility": 0.02,
         "distribution_spec_version": "distribution-spec-v1",
+        "distribution_spec_hash": SPEC_HASH,
         "metric_definition_version": FORECAST_METRIC_REGISTRY_VERSION,
     }
     fields.update(overrides)

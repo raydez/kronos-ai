@@ -27,6 +27,7 @@ from kronos_ai.forecast.distribution import (
     ThresholdSpec,
     _metric_series,
     build_distribution,
+    distribution_spec_hash,
     forecast_samples_from_raw,
 )
 
@@ -127,6 +128,54 @@ def test_custom_spec_targets_other_metrics() -> None:
     assert len(dist.threshold_probabilities) == 1
     assert dist.threshold_probabilities[0].probability == pytest.approx(1 / 3)
     assert dist.quantiles[0].metric == "path_volatility"
+    assert dist.distribution_spec_hash == distribution_spec_hash(spec)
+    assert dist.distribution_spec_hash != distribution_spec_hash(DEFAULT_DISTRIBUTION_SPEC)
+
+
+class TestDistributionSpecHash:
+    """spec 是 forecast 身份的一部分：阈值/分位不同 → hash 不同（§12/§15）。"""
+
+    def test_golden_hash(self) -> None:
+        assert (
+            distribution_spec_hash()
+            == "6f5230d539f420bd38eb070a7e0ad1958a516811dc79faabc1465f9c9a66ecea"
+        )
+
+    def test_default_spec_roundtrips(self) -> None:
+        dist = build_distribution(raw_set([[100.0, 110.0]]), origin_close=100.0)
+        assert dist.distribution_spec_hash == distribution_spec_hash(DEFAULT_DISTRIBUTION_SPEC)
+
+    def test_hash_changes_with_threshold_value(self) -> None:
+        default = distribution_spec_hash(DEFAULT_DISTRIBUTION_SPEC)
+        tweaked = distribution_spec_hash(
+            DistributionSpec(
+                thresholds=(ThresholdSpec(metric="horizon_return", operator="gt", threshold=0.03),),
+                quantiles=DEFAULT_DISTRIBUTION_SPEC.quantiles,
+            )
+        )
+        assert tweaked != default
+
+    def test_hash_changes_with_operator_only(self) -> None:
+        left = distribution_spec_hash(
+            DistributionSpec(thresholds=(ThresholdSpec(metric="horizon_return", operator="gt", threshold=0.0),))
+        )
+        right = distribution_spec_hash(
+            DistributionSpec(thresholds=(ThresholdSpec(metric="horizon_return", operator="gte", threshold=0.0),))
+        )
+        assert left != right
+
+    def test_hash_changes_with_quantile_set(self) -> None:
+        left = distribution_spec_hash(
+            DistributionSpec(quantiles=(QuantileSpec(metric="horizon_return", quantile=0.5),))
+        )
+        right = distribution_spec_hash(
+            DistributionSpec(quantiles=(QuantileSpec(metric="horizon_return", quantile=0.75),))
+        )
+        assert left != right
+
+    def test_empty_spec_is_valid_and_distinct(self) -> None:
+        empty = DistributionSpec(thresholds=(), quantiles=())
+        assert distribution_spec_hash(empty) != distribution_spec_hash(DEFAULT_DISTRIBUTION_SPEC)
 
 
 def test_metric_series_covers_registry() -> None:

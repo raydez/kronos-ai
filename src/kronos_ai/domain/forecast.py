@@ -29,7 +29,7 @@ from pydantic import (
 from kronos_ai.domain.symbols import validate_normalized_symbol
 from kronos_ai.domain.time import ResearchTime, ensure_shanghai_aware
 
-FORECAST_CONTRACT_VERSION = "forecast-contract-v1"
+FORECAST_CONTRACT_VERSION = "forecast-contract-v2"
 
 HASH_KIND_SAMPLING = "sampling_config"
 HASH_KIND_REQUEST = "forecast_request"
@@ -409,6 +409,7 @@ class ForecastDistribution(BaseModel):
     expected_path_volatility: float
 
     distribution_spec_version: str
+    distribution_spec_hash: Hash256
     metric_definition_version: str
 
     @field_validator("horizon", "sample_count", mode="before")
