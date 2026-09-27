@@ -1,0 +1,87 @@
+# Forecast Benchmark v1 实验配置（§32.1 / §41 / §48）
+#
+# 用途：
+#   kronos-ai benchmark forecast --config configs/benchmark-forecast.yaml
+#
+# 约束（由 ExperimentConfig 在加载时强制）：
+# - 本文件不得出现任何 secret（API_KEY / HF_TOKEN / token / password 一类键名直接拒绝
+#   加载）；secret 只从环境变量读取，绝不进 config，也绝不进 run artifact。
+# - `evaluation.horizon_sessions` / `evaluation.embargo_sessions` 的单一真源是 LabelPolicy
+#   （§27/§28）。这里写下的值必须与 `evaluation.label_policy_version` 的版本化定义一致，
+#   否则加载即失败——要改 embargo 必须先新增 LabelPolicy 版本。
+# - `dataset.symbols` 是**本次 run 实际使用的名单**（point-in-time universe snapshot 的
+#   解析结果，§6.2）；不要写「csi300」这种随成分变动的写法。`universe` 段当前只是声明
+#   （不解析名单、不产出 universe.parquet），已登记为 ADR-023 §8 的显式 defer。
+# - `dataset.start_session..end_session` 在日历上的 session 数必须**恰好**等于
+#   lookback_bars + Σsegments + embargo × gaps，否则运行被拒绝（不静默截断）；窗口末端
+#   后面还必须至少有 horizon 个已发布 session，否则最后一个 origin 没有 label，运行同样
+#   被拒绝。
+# - `data.adjustment` 是复权口径（数据身份，进 config_hash）；不要在命令行上覆盖它。
+
+version: experiment-config-v1
+
+runtime:
+  device: auto
+  dtype: auto
+
+# 复权口径属于数据身份（ADR-007）：raw / hfq / qfq 改变每一根 bar，也就改变每个预测与
+# 每个 label。它写在 config 里而不是命令行 flag 上，因此随 run 归档并进 config_hash。
+data:
+  adjustment: raw
+
+forecast:
+  backend: kronos
+  lookback_bars: 32
+  sampling:
+    seed: 42
+    sample_count: 64
+    temperature: 1.0
+    top_k: 0
+    top_p: 0.9
+
+knowledge_cutoff_policy: same_day_evening
+
+universe:
+  source: csi300
+  snapshot: point-in-time
+
+evaluation:
+  walk_forward: true
+  label_policy_version: label-policy-v1
+  # 与 label-policy-v1 的定义一致；不一致会被拒绝加载（§32.1）
+  embargo_sessions: 5
+  horizon_sessions: 5
+
+dataset:
+  symbols:
+    - "600000"
+    - "000001"
+  # 窗口 session 数必须**恰好**等于 lookback(32) + train(25) + test(16) + embargo(5)×1 = 78。
+  # 2026-06-01..2026-09-17 在 SSE 日历上正好 78 个 session（BaoStock query_trade_dates）。
+  # 末端刻意留在数据覆盖末端之前至少 horizon 个 session：最后一个 origin 的 label 窗口
+  # 必须已经存在，否则它会被判成 INSUFFICIENT_FUTURE_BARS（那是数据末端语义，不是这个
+  # 示例想演示的东西）。改窗口前先数 session，长度不符会被拒绝运行。
+  start_session: 2026-06-01
+  end_session: 2026-09-17
+  segments:
+    - name: train
+      length_sessions: 25
+    - name: test
+      length_sessions: 16
+
+benchmark:
+  backends:
+    - last_value
+    - drift
+    - moving_average
+    - ar1
+    - kronos
+  # §48 的 pilot 旋钮：``origin_limit`` 是**唯一**允许缩小样本量的设置，且会被记录在 run
+  # metadata（truncated=true）里。截断顺序是**段顺序内按 (market_date, symbol)**（ADR-023
+  # §2.1）：取该顺序下的**前 N 个 origin**。因此 limit 小于段内 origin 数时 test 段一个都
+  # 不会跑；limit 小于 symbol 数时也**不是**「每个 symbol 都覆盖到」——它只覆盖排序靠前的
+  # 那几个 symbol。无论哪种缩水，都由 metadata / report 的 evaluated_origins_by_symbol
+  # 显式记录下来（这正是「pilot 有没有悄悄缩掉 universe」可被读出来的原因）。
+  # 本示例不截断（下面注释掉 = 跑满），需要快速 pilot 时再打开；把值设得比
+  # considered_origins 还大是不需要截断的噪音。
+  # origin_limit: 50

@@ -46,8 +46,9 @@ from __future__ import annotations
 import contextlib
 import importlib
 import socket
+import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from types import ModuleType
@@ -165,6 +166,21 @@ def _run_bounded[T](
     return cast("T", box["value"])
 
 
+@contextlib.contextmanager
+def _third_party_stdout_to_stderr() -> Iterator[None]:
+    """把第三方库的进度打印从 stdout 挪到 stderr。
+
+    baostock 直接 ``print("login success!")`` / ``print("logout success!")``，而 CLI 的
+    ``--json`` 输出同样写在 stdout：两者混在一起会让机器可读输出无法解析（实测
+    ``json.loads(stdout)`` 失败）。第三方库的打印是诊断信息，挪到 stderr 而不是丢弃。
+
+    ``redirect_stdout`` 交换的是进程级 ``sys.stdout``，因此只在**已被会话锁串行化**的
+    调用点（login / logout / 单次 query）内使用，避免与其他线程的输出交错。
+    """
+    with contextlib.redirect_stdout(sys.stderr):
+        yield
+
+
 def _login_with_bounded_timeout(module: ModuleType) -> Any:
     """login 期间临时收紧进程默认 socket 超时，给会话 socket 一个等待上界。
 
@@ -180,7 +196,8 @@ def _login_with_bounded_timeout(module: ModuleType) -> Any:
     previous = socket.getdefaulttimeout()
     socket.setdefaulttimeout(BAOSTOCK_SOCKET_TIMEOUT_SECONDS)
     try:
-        return module.login()
+        with _third_party_stdout_to_stderr():
+            return module.login()
     except Exception as exc:  # login 内部的 UnboundLocalError 等不得逃逸为裸异常
         raise ProviderError(f"baostock login raised: {exc!r}") from exc
     finally:
@@ -214,7 +231,9 @@ class _BaostockSession:
             if self._refs > 0:
                 self._refs -= 1
             if self._refs == 0 and self._logged_in:
-                self.module.logout()
+                # logout 也打印 "logout success!"，同样不得混进 CLI 的 stdout
+                with _third_party_stdout_to_stderr():
+                    self.module.logout()
                 self._logged_in = False
 
     def _login(self, hard_timeout: float) -> None:
@@ -309,7 +328,8 @@ def _run_query(
     ``label`` 是查询族名（``query`` / ``query_hs300_stocks`` …），只进错误消息。
     """
     try:
-        result = query()
+        with _third_party_stdout_to_stderr():
+            result = query()
     except KronosAIError:
         raise
     except Exception as exc:  # 客户端本地异常（IndexError/JSONDecodeError 等）
@@ -451,89 +471,155 @@ class BaoStockProvider(_BaostockSessionClient):
         return bars
 
     def _fetch_window(self, code: str, start: date, end: date) -> list[dict[str, str]]:
-        """按页收集行数据；不使用 ``ResultData.get_data()``。
-
-        0.9.4 的 ``get_data()`` 用已从 pandas 移除的 ``DataFrame.append`` 合并翻页结果，
-        单股窗口超过一页（``common.contants.BAOSTOCK_PER_PAGE_COUNT`` 行）即抛
-        AttributeError；官方 demo 的 ``next()`` / ``get_row_data()`` 路径没有该问题。
-        查询 + 翻页整体施加硬超时（见 ``_run_bounded``），超时关闭会话 socket。
-        """
+        """按页收集行数据（PIT 路径）；实现见 :func:`_fetch_k_line_window`。"""
         self._ensure_session()
-        with self._session.lock:
-            return _run_bounded(
-                lambda: _run_query(
-                    lambda: self._bs.query_history_k_data_plus(
-                        code,
-                        K_LINE_FIELDS,
-                        start_date=start.isoformat(),
-                        end_date=end.isoformat(),
-                        frequency="d",
-                        adjustflag=self._adjust_flag,
-                    ),
-                    label="query",
-                    subject=code,
-                    per_page=self._per_page_count,
-                ),
-                label=f"query {code}",
-                timeout=self._hard_timeout,
-                on_timeout=self._session.break_socket,
-            )
+        return _fetch_k_line_window(
+            self._bs,
+            session_lock=self._session.lock,
+            per_page=self._per_page_count,
+            hard_timeout=self._hard_timeout,
+            on_timeout=self._session.break_socket,
+            code=code,
+            start=start,
+            end=end,
+            adjust_flag=self._adjust_flag,
+        )
 
     def _parse_bars(
-        self, rows: list[dict[str, str]], symbol: str, knowledge_cutoff: datetime
+        self,
+        rows: list[dict[str, str]],
+        symbol: str,
+        knowledge_cutoff: datetime | None,
+        *,
+        window: set[date] | None = None,
     ) -> list[MarketBar]:
-        bars: list[MarketBar] = []
-        for idx, row in enumerate(rows):
-            bar_day_text = str(row.get("date", ""))
-            try:
-                bar_day = date.fromisoformat(bar_day_text)
-                status = TRADE_STATUS_MAP[str(row["tradestatus"]).strip()]
-                close = float(row["close"])
-            except (KeyError, TypeError, ValueError) as exc:
-                raise DataQualityError(
-                    f"baostock returned malformed row #{idx} (date={bar_day_text!r}) "
-                    f"for {symbol}: {exc}"
-                ) from exc
+        """把 K 线行解析成 MarketBar（PIT 路径）；实现见 :func:`_parse_k_line_rows`。"""
+        return _parse_k_line_rows(
+            rows,
+            symbol,
+            adjustment_mode=self._adjustment_mode,
+            knowledge_cutoff=knowledge_cutoff,
+            window=window,
+        )
 
-            if status == "suspended" or close <= 0:
-                continue
 
-            timestamp = datetime.combine(bar_day, time(15, 0), tzinfo=CN_TZ)
-            available_at = datetime.combine(bar_day, BAO_STOCK_PUBLISHED_AT, tzinfo=CN_TZ)
-            if available_at > knowledge_cutoff:
-                continue
+def _optional_positive_float(value: Any) -> float | None:
+    """缺失/空串/非正数 → None（domain 允许 volume/amount 为 None）。
 
-            try:
-                bars.append(
-                    MarketBar(
-                        symbol=symbol,
-                        timestamp=timestamp,
-                        open=float(row["open"]),
-                        high=float(row["high"]),
-                        low=float(row["low"]),
-                        close=close,
-                        volume=self._optional_float(row.get("volume")),
-                        amount=self._optional_float(row.get("amount")),
-                        trade_status=status,
-                        adjustment_mode=self._adjustment_mode,
-                        available_at=available_at,
-                    )
-                )
-            except (KeyError, TypeError, ValueError, ValidationError) as exc:
-                raise DataQualityError(
-                    f"baostock returned malformed row #{idx} (date={bar_day_text!r}) "
-                    f"for {symbol}: {exc}"
-                ) from exc
-        return bars
+    模块级函数而不是类方法：§29 的 label 窗口解析路径与 PIT history 解析共用同一口径，
+    不能因为「只在 K 线解析里用到」而让第二个使用点复制一份。
+    """
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
 
-    @staticmethod
-    def _optional_float(value: Any) -> float | None:
-        """缺失/空串/非正数 → None（domain 允许 volume/amount 为 None）。"""
+
+def _fetch_k_line_window(
+    baostock: Any,
+    *,
+    session_lock: Any,
+    per_page: int,
+    hard_timeout: float,
+    on_timeout: Any,
+    code: str,
+    start: date,
+    end: date,
+    adjust_flag: str,
+) -> list[dict[str, str]]:
+    """按页收集日线行数据；不使用 ``ResultData.get_data()``。
+
+    0.9.4 的 ``get_data()`` 用已从 pandas 移除的 ``DataFrame.append`` 合并翻页结果，
+    单股窗口超过一页（``common.contants.BAOSTOCK_PER_PAGE_COUNT`` 行）即抛
+    AttributeError；官方 demo 的 ``next()`` / ``get_row_data()`` 路径没有该问题。
+    查询 + 翻页整体施加硬超时（见 ``_run_bounded``），超时关闭会话 socket。
+
+    提到模块级是为了让 PIT history 与 §29 label 窗口**共用同一份取数实现**：两条路径的
+    差别只有「是否按 cutoff 过滤」（见 :func:`_parse_k_line_rows`），取数协议必须一致，
+    否则一边修好的翻页/超时 bug 会在另一边复现。
+    """
+    with session_lock:
+        return _run_bounded(
+            lambda: _run_query(
+                lambda: baostock.query_history_k_data_plus(
+                    code,
+                    K_LINE_FIELDS,
+                    start_date=start.isoformat(),
+                    end_date=end.isoformat(),
+                    frequency="d",
+                    adjustflag=adjust_flag,
+                ),
+                label="query",
+                subject=code,
+                per_page=per_page,
+            ),
+            label=f"query {code}",
+            timeout=hard_timeout,
+            on_timeout=on_timeout,
+        )
+
+
+def _parse_k_line_rows(
+    rows: list[dict[str, str]],
+    symbol: str,
+    *,
+    adjustment_mode: str,
+    knowledge_cutoff: datetime | None,
+    window: set[date] | None = None,
+) -> list[MarketBar]:
+    """把 K 线行解析成 MarketBar。
+
+    ``knowledge_cutoff=None`` 表示**不过滤可见性**：只有 benchmark 的 label 窗口使用该
+    模式（label 按定义需要 origin 之后的价格，§29）。``window`` 进一步把行限制在指定
+    session 集合内——label 抓取的日期区间必然包含窗口外的交易日，多出来的行直接丢弃，
+    而不是报错。
+    """
+    bars: list[MarketBar] = []
+    for idx, row in enumerate(rows):
+        bar_day_text = str(row.get("date", ""))
         try:
-            parsed = float(value)
-        except (TypeError, ValueError):
-            return None
-        return parsed if parsed > 0 else None
+            bar_day = date.fromisoformat(bar_day_text)
+            status = TRADE_STATUS_MAP[str(row["tradestatus"]).strip()]
+            close = float(row["close"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise DataQualityError(
+                f"baostock returned malformed row #{idx} (date={bar_day_text!r}) "
+                f"for {symbol}: {exc}"
+            ) from exc
+
+        if status == "suspended" or close <= 0:
+            continue
+        if window is not None and bar_day not in window:
+            continue
+
+        timestamp = datetime.combine(bar_day, time(15, 0), tzinfo=CN_TZ)
+        available_at = datetime.combine(bar_day, BAO_STOCK_PUBLISHED_AT, tzinfo=CN_TZ)
+        if knowledge_cutoff is not None and available_at > knowledge_cutoff:
+            continue
+
+        try:
+            bars.append(
+                MarketBar(
+                    symbol=symbol,
+                    timestamp=timestamp,
+                    open=float(row["open"]),
+                    high=float(row["high"]),
+                    low=float(row["low"]),
+                    close=close,
+                    volume=_optional_positive_float(row.get("volume")),
+                    amount=_optional_positive_float(row.get("amount")),
+                    trade_status=status,
+                    adjustment_mode=adjustment_mode,
+                    available_at=available_at,
+                )
+            )
+        except (KeyError, TypeError, ValueError, ValidationError) as exc:
+            raise DataQualityError(
+                f"baostock returned malformed row #{idx} (date={bar_day_text!r}) "
+                f"for {symbol}: {exc}"
+            ) from exc
+    return bars
 
 
 @dataclass(frozen=True)
@@ -800,3 +886,77 @@ class BaoStockTradingCalendarLoader(_BaostockSessionClient):
                 timeout=self._hard_timeout,
                 on_timeout=self._session.break_socket,
             )
+
+
+class BaoStockLabelBarProvider(_BaostockSessionClient):
+    """benchmark label 窗口的 ground truth 来源（§29；ADR-023）。
+
+    与 :class:`BaoStockProvider` 的**唯一**区别是不按 ``knowledge_cutoff`` 过滤：label
+    按定义需要 origin 之后的价格。这个区别必须体现在类型上（两个类、两个调用点），而不是
+    一个布尔开关——否则「哪一行代码允许看到未来数据」在评审时无法一眼确认。
+
+    ``data_coverage_end`` 由调用方显式给出（通常取本次 run 所用日历的最后一个 session）：
+    provider 自己无法在不查询未来的前提下知道「数据发布到哪一天」，猜一个值会让
+    ``INSUFFICIENT_FUTURE_BARS`` 与 ``SUSPENDED`` 混为一谈（ADR-009 §2）。
+
+    抓取区间按 ``sessions`` 首尾 + 缓冲日展开；**窗口外的行被丢弃**，停在窗口内的行照常
+    返回。停牌 / 非正价格行按与 history 相同的口径剔除，因此 ``build_label`` 会把它们
+    记为 ``SUSPENDED``——这里绝不补一根假 bar。
+    """
+
+    def __init__(
+        self,
+        *,
+        data_coverage_end: date,
+        adjust_flag: str = "3",
+        baostock_module: ModuleType | None = None,
+        hard_timeout_seconds: float = BAOSTOCK_HARD_TIMEOUT_SECONDS,
+    ) -> None:
+        if adjust_flag not in ADJUST_FLAG_TO_MODE:
+            raise ConfigurationError(f"unknown adjust_flag: {adjust_flag!r}")
+        _require_plain_date(data_coverage_end, "data_coverage_end")
+        self._data_coverage_end = data_coverage_end
+        self._adjust_flag = adjust_flag
+        self._adjustment_mode = ADJUST_FLAG_TO_MODE[adjust_flag]
+        super().__init__(baostock_module=baostock_module, hard_timeout_seconds=hard_timeout_seconds)
+
+    @property
+    def data_coverage_end(self) -> date:
+        return self._data_coverage_end
+
+    def get_label_bars(
+        self, symbol: str, market_date: date, sessions: Sequence[date]
+    ) -> tuple[MarketBar, ...]:
+        if not sessions:
+            raise ConfigurationError("label window must not be empty")
+        # 与 PIT 路径一样先确保会话：本类可以独立使用（不依赖别人先登录），
+        # 否则会以 "you don't login" 这种与调用者无关的消息失败。
+        self._ensure_session()
+        try:
+            normalized = normalize_symbol(symbol)
+        except ValueError as exc:
+            raise ConfigurationError(f"invalid symbol: {symbol!r}") from exc
+        window = set(sessions)
+        code = to_baostock_code(normalized)
+        # 缓冲 7 天覆盖周末/节假日：抓取区间**必然**包含窗口外的交易日，靠 window 过滤。
+        start = min(sessions) - timedelta(days=7)
+        end = max(sessions)
+        rows = _fetch_k_line_window(
+            self._bs,
+            session_lock=self._session.lock,
+            per_page=self._per_page_count,
+            hard_timeout=self._hard_timeout,
+            on_timeout=self._session.break_socket,
+            code=code,
+            start=start,
+            end=end,
+            adjust_flag=self._adjust_flag,
+        )
+        bars = _parse_k_line_rows(
+            rows,
+            normalized,
+            adjustment_mode=self._adjustment_mode,
+            knowledge_cutoff=None,
+            window=window,
+        )
+        return tuple(sorted(bars, key=lambda bar: bar.timestamp))

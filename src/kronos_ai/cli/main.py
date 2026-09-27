@@ -23,6 +23,7 @@ from collections.abc import Callable
 from typing import Protocol, get_args
 
 from kronos_ai.cli import commands
+from kronos_ai.data.adjustment import AdjustmentMode
 from kronos_ai.domain.run import RUN_STATUSES
 from kronos_ai.domain.time import KnowledgeCutoffPolicy
 from kronos_ai.errors import KronosAIError
@@ -31,6 +32,8 @@ __all__ = ["build_parser", "main"]
 
 # argparse choices 与 §5 policy Literal 同源，避免名单在两处漂移
 _CUTOFF_POLICIES = get_args(KnowledgeCutoffPolicy)
+# 同理：复权口径的名单只有 AdjustmentMode 一个真源（§6.1 / ADR-007）
+_ADJUSTMENT_MODES = get_args(AdjustmentMode)
 
 
 class _Command(Protocol):
@@ -71,7 +74,7 @@ def build_parser() -> argparse.ArgumentParser:
     forecast.add_argument("--top-k", type=int, default=0)
     forecast.add_argument("--top-p", type=float, default=0.9)
     forecast.add_argument("--lookback-bars", type=int, default=None)
-    forecast.add_argument("--adjust", choices=("raw", "hfq", "qfq"), default="raw")
+    forecast.add_argument("--adjust", choices=_ADJUSTMENT_MODES, default="raw")
     forecast.add_argument("--device", choices=("auto", "cpu", "mps", "cuda"), default="auto")
     forecast.add_argument("--dtype", choices=("auto", "float32"), default="auto")
     forecast.add_argument(
@@ -83,7 +86,6 @@ def build_parser() -> argparse.ArgumentParser:
     forecast.add_argument("--output", default=None, help="write ForecastResult JSON to this file")
     forecast.add_argument("--json", action="store_true", help="print machine-readable summary")
     forecast.set_defaults(handler=commands.run_forecast)
-
     run = sub.add_parser("run", help="inspect stored runs")
     run_sub = run.add_subparsers(dest="run_command")
 
@@ -112,6 +114,22 @@ def build_parser() -> argparse.ArgumentParser:
     list_runs.add_argument("--json", action="store_true")
     add_store_args(list_runs)
     list_runs.set_defaults(handler=commands.run_list)
+
+    benchmark = sub.add_parser("benchmark", help="run reproducible walk-forward benchmarks")
+    benchmark_sub = benchmark.add_subparsers(dest="benchmark_command")
+
+    bench_forecast = benchmark_sub.add_parser(
+        "forecast", help="Forecast Benchmark v1 over a walk-forward dataset (§41/§48/§49)"
+    )
+    bench_forecast.add_argument("--config", required=True, help="YAML experiment config (§32.1)")
+    bench_forecast.add_argument(
+        "--cache-dir",
+        default=None,
+        help="forecast artifact cache root; omit to disable caching",
+    )
+    bench_forecast.add_argument("--json", action="store_true", help="print machine-readable output")
+    add_store_args(bench_forecast)
+    bench_forecast.set_defaults(handler=commands.run_benchmark_forecast)
 
     return parser
 

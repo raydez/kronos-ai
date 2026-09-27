@@ -14,6 +14,7 @@ from typing import Any, cast, get_args
 from kronos_ai.domain.forecast import ForecastResult, SamplingConfig
 from kronos_ai.domain.hashing import canonical_json
 from kronos_ai.domain.time import KnowledgeCutoffPolicy, cutoff_policy_record
+from kronos_ai.evaluation.benchmark import ForecastBenchmarkResult
 from kronos_ai.infrastructure.persistence.run_registry import RunRecord
 
 
@@ -150,3 +151,38 @@ def calendar_span(market_date: date, horizon: int) -> tuple[date, date]:
         market_date - timedelta(days=7),
         market_date + timedelta(days=max(30, horizon * 3 + 30)),
     )
+
+
+def format_benchmark_summary(result: ForecastBenchmarkResult, *, run_id: str) -> str:
+    """benchmark run 的文本摘要（§34：CLI 输出必须能直接回答「跑了什么、结论如何」）。
+
+    每个 backend 一行 overall 指标；``None`` 显示为 ``n/a``（与 ``report.md`` 同一口径，
+    避免 CLI 与 artifact 对「缺失」的表述不一致）。
+    """
+    lines = [
+        f"run_id            {run_id}",
+        f"benchmark         {result.version}",
+        f"dataset_hash      {result.dataset_hash}",
+        f"report_hash       {result.report_hash}",
+        f"label_policy      {result.label_policy_version}",
+        f"horizon           {result.horizon_sessions} sessions",
+        f"lookback_bars     {result.lookback_bars}",
+        f"origins           {result.evaluated_origins} evaluated / "
+        f"{result.considered_origins} considered"
+        + ("  (pilot subset)" if result.truncated else ""),
+        "-- overall metrics --",
+    ]
+    for backend in result.backends:
+        entry = result.metrics_for(backend, group="all")
+        if entry is None:
+            lines.append(f"  {backend:15} n/a (no records)")
+            continue
+        lines.append(
+            f"  {backend:15} n={entry.sample_count:<4} labeled={entry.labeled_count:<4} mae={_benchmark_metric_cell(entry.mae)} rmse={_benchmark_metric_cell(entry.rmse)} "
+            f"dir={_benchmark_metric_cell(entry.direction_accuracy)} corr={_benchmark_metric_cell(entry.return_correlation)} cov={_benchmark_metric_cell(entry.quantile_coverage)}"
+        )
+    return "\n".join(lines)
+
+
+def _benchmark_metric_cell(value: float | None) -> str:
+    return "n/a" if value is None else f"{value:+.4f}"

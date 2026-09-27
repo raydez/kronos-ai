@@ -7,6 +7,7 @@ handler 只负责参数校验、调用与输出。
 from __future__ import annotations
 
 import json
+import platform
 from argparse import Namespace
 from collections.abc import Callable
 from datetime import date, datetime
@@ -14,27 +15,43 @@ from pathlib import Path
 from typing import cast
 
 from kronos_ai.cli.context import (
+    BenchmarkContext,
+    build_benchmark_context,
     build_forecast_service,
     default_artifacts_dir,
     index_db_path_for,
 )
 from kronos_ai.cli.format import (
     cutoff_policy_from_args,
+    format_benchmark_summary,
     format_run_record,
     print_forecast,
     sampling_from_args,
     write_forecast_result,
 )
+from kronos_ai.config import ExperimentConfig, load_experiment_config
 from kronos_ai.domain.run import RunStatus
-from kronos_ai.domain.time import resolve_knowledge_cutoff
+from kronos_ai.domain.time import CN_TZ, resolve_knowledge_cutoff
 from kronos_ai.errors import ArtifactError
+from kronos_ai.evaluation.benchmark import (
+    build_benchmark_run_metadata,
+    run_forecast_benchmark,
+)
+from kronos_ai.evaluation.report import (
+    metrics_payload,
+    write_forecast_benchmark_artifacts,
+)
 from kronos_ai.forecast.service import ForecastService
-from kronos_ai.infrastructure.persistence.artifact_store import ArtifactStore
-from kronos_ai.infrastructure.persistence.run_registry import RunRegistry
+from kronos_ai.infrastructure.persistence.artifact_store import (
+    ArtifactStore,
+    run_dir_relative,
+)
+from kronos_ai.infrastructure.persistence.run_registry import RunRecord, RunRegistry
 from kronos_ai.infrastructure.persistence.schema import open_database
 from kronos_ai.infrastructure.persistence.sqlite import SQLiteDatabase
 
 ForecastServiceFactory = Callable[[Namespace, datetime], ForecastService]
+BenchmarkContextFactory = Callable[[ExperimentConfig, Namespace], BenchmarkContext]
 
 
 def resolve_cutoff(args: Namespace) -> datetime:
@@ -144,6 +161,133 @@ def run_list(args: Namespace) -> int:
         else:
             for record in records:
                 print(format_run_record(record))
+    finally:
+        database.close()
+    return 0
+
+
+def git_commit() -> str | None:
+    """读取当前 git commit（§32 可追溯性）；读取失败返回 ``None``，不编造。
+
+    容器 / 打包环境里没有 ``.git`` 是正常情况：报告里该字段显式为 ``null``，
+    读报告的人知道「无法追溯」而不是「追溯到了某个值」。
+    """
+    import subprocess
+
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    value = completed.stdout.strip()
+    return value or None
+
+
+def environment_info() -> dict[str, str]:
+    """§32 ``runtime`` 维：进程环境事实（python / torch 版本），读不到就不写。
+
+    这些值不进 ``report_hash``（环境事实，理由见 ADR-023 §5），但必须随 run 归档：同一份
+    config 在 torch 版本不同时跑出的数字未必可比。
+    """
+    info = {"python": platform.python_version()}
+    try:
+        import torch
+
+        info["torch"] = str(torch.__version__)
+    except ImportError:
+        pass
+    return info
+
+
+def run_benchmark_forecast(
+    args: Namespace,
+    *,
+    context_factory: BenchmarkContextFactory = build_benchmark_context,
+) -> int:
+    """``kronos-ai benchmark forecast --config <yaml>``（§34 / §41 / §49）。
+
+    编排顺序：装载 config → 装配 context → **跑 benchmark** → 用结果建 metadata → 登记 run
+    → 落盘 artifact。run_id 只有在拿到结果后才分配，因此：
+
+    ```text
+    benchmark 阶段失败（provider / backend / history 不足）→ 不留 run 记录（CLI 报错并退出 1）
+    落盘阶段失败                                        → 留 ``failed`` 记录 + 错误消息
+    ```
+
+    这是刻意的：run 记录的身份由 ``dataset_hash`` / ``report_hash`` 定义，而这两个只有跑完才
+    存在；一个没有结果的 run 没有可追溯的身份，把它登记成 ``failed`` 反而会让「run 目录」
+    指向不存在的产物。中途失败的可见性由 CLI 的退出码与 stderr 承担。
+    """
+    config, raw_text = load_experiment_config(args.config)
+    context = context_factory(config, args)
+    spec = config.benchmark_spec()
+    result = run_forecast_benchmark(
+        dataset=context.dataset,
+        provider=context.provider,
+        label_provider=context.label_provider,
+        backends=context.backends,
+        spec=spec,
+        sampling=config.sampling,
+    )
+
+    database, store, registry = _open_persistence(args)
+    try:
+        run_id = registry.new_run_id()
+        metadata = build_benchmark_run_metadata(
+            result=result,
+            run_id=run_id,
+            git_commit=git_commit(),
+            config_hash=config.config_hash,
+            adjustment=config.data.adjustment,
+            backend_identities=context.backend_identities,
+            environment=environment_info(),
+        )
+        now = datetime.now(CN_TZ)
+        registry.register(
+            RunRecord(
+                run_id=run_id,
+                kind="benchmark_forecast",
+                status="running",
+                created_at=now,
+                updated_at=now,
+                config_hash=config.config_hash,
+                dataset_hash=result.dataset_hash,
+                run_dir=run_dir_relative(run_id),
+                metadata=metadata,
+            )
+        )
+        try:
+            write_forecast_benchmark_artifacts(
+                store=store,
+                run_id=run_id,
+                result=result,
+                metadata=metadata,
+                config_text=raw_text,
+            )
+        except Exception as exc:
+            registry.update_status(
+                run_id, "failed", error=f"{type(exc).__name__}: {exc}", now=datetime.now(CN_TZ)
+            )
+            raise
+        registry.update_status(run_id, "succeeded", now=datetime.now(CN_TZ))
+
+        if getattr(args, "json", False):
+            payload = {
+                "run_id": run_id,
+                "config_hash": config.config_hash,
+                "metadata": metadata,
+                "metrics": metrics_payload(result),
+            }
+            print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+        else:
+            print(format_benchmark_summary(result, run_id=run_id))
     finally:
         database.close()
     return 0

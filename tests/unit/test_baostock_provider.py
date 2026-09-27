@@ -28,6 +28,7 @@ from kronos_ai.errors import (
 from kronos_ai.infrastructure.providers.baostock import (
     BAOSTOCK_HARD_TIMEOUT_SECONDS,
     BAOSTOCK_SOCKET_TIMEOUT_SECONDS,
+    BaoStockLabelBarProvider,
     BaoStockProvider,
     to_baostock_code,
 )
@@ -641,3 +642,101 @@ class TestSessionLifecycle:
 
     def test_satisfies_market_data_provider_protocol(self) -> None:
         assert isinstance(provider(FakeBaostock()), MarketDataProvider)
+
+
+class TestLabelBarProvider:
+    """§29 label 取数路径（RX-KAI-019）：唯一允许读 origin 之后价格的 provider 方法。
+
+    这些用例把「label 路径与 PIT 路径的差别」钉死在两件事上：**不过滤 knowledge_cutoff**、
+    **只返回窗口内的 session**。其余（停牌剔除、不合成 bar、显式失败）与 history 路径同源。
+    """
+
+    def make(self, fake: FakeBaostock, **kwargs: Any) -> BaoStockLabelBarProvider:
+        return BaoStockLabelBarProvider(
+            data_coverage_end=date(2026, 10, 9), baostock_module=fake, **kwargs
+        )
+
+    def window(self) -> tuple[date, ...]:
+        return (date(2026, 9, 28), date(2026, 9, 29), date(2026, 9, 30))
+
+    def test_returns_future_bars_beyond_any_cutoff(self) -> None:
+        """label 按定义需要 origin 之后的 bar：这里**不能**有 cutoff 过滤。"""
+        fake = FakeBaostock(
+            query_results=[
+                ok(row("2026-09-25"), row("2026-09-28"), row("2026-09-29"), row("2026-09-30"))
+            ]
+        )
+        bars = self.make(fake).get_label_bars("600000", date(2026, 9, 25), self.window())
+        assert [bar.timestamp.date() for bar in bars] == list(self.window())
+        # 09-25 在窗口外：抓取区间必然包含窗口外的交易日，必须被丢掉而不是报错
+        assert fake.queries[0]["start_date"] == "2026-09-21"
+        assert fake.queries[0]["end_date"] == "2026-09-30"
+
+    def test_suspended_session_is_absent_not_synthesized(self) -> None:
+        fake = FakeBaostock(
+            query_results=[
+                ok(
+                    row("2026-09-28"),
+                    row("2026-09-29", tradestatus="0"),
+                    row("2026-09-30"),
+                )
+            ]
+        )
+        bars = self.make(fake).get_label_bars("600000", date(2026, 9, 25), self.window())
+        assert [bar.timestamp.date() for bar in bars] == [
+            date(2026, 9, 28),
+            date(2026, 9, 30),
+        ]
+
+    def test_session_is_established_independently(self) -> None:
+        """独立使用时也要能工作（不能依赖别的 provider 已经登录）。"""
+        fake = FakeBaostock(query_results=[ok(row("2026-09-28"))])
+        provider_instance = self.make(fake)
+        provider_instance.get_label_bars("600000", date(2026, 9, 25), (date(2026, 9, 28),))
+        assert fake.login_calls == 1
+        provider_instance.close()
+        assert fake.logout_calls == 1
+
+    def test_use_after_close_rejected(self) -> None:
+        fake = FakeBaostock(query_results=[ok(row("2026-09-28"))])
+        provider_instance = self.make(fake)
+        provider_instance.get_label_bars("600000", date(2026, 9, 25), (date(2026, 9, 28),))
+        provider_instance.close()
+        with pytest.raises(ConfigurationError, match="closed"):
+            provider_instance.get_label_bars("600000", date(2026, 9, 25), (date(2026, 9, 28),))
+
+    def test_unknown_adjust_flag_rejected(self) -> None:
+        with pytest.raises(ConfigurationError, match="adjust_flag"):
+            BaoStockLabelBarProvider(data_coverage_end=date(2026, 10, 9), adjust_flag="9")
+
+    def test_empty_window_rejected(self) -> None:
+        with pytest.raises(ConfigurationError, match="must not be empty"):
+            self.make(FakeBaostock()).get_label_bars("600000", date(2026, 9, 25), ())
+
+    def test_invalid_symbol_rejected(self) -> None:
+        # 6 位数字但无对应板块前缀：映射层显式失败（不猜交易所）
+        with pytest.raises(ConfigurationError, match="cannot map"):
+            self.make(FakeBaostock()).get_label_bars("999999", date(2026, 9, 25), self.window())
+
+    def test_coverage_end_is_what_the_caller_declared(self) -> None:
+        provider_instance = self.make(FakeBaostock())
+        try:
+            assert provider_instance.data_coverage_end == date(2026, 10, 9)
+        finally:
+            provider_instance.close()
+
+    def test_malformed_row_fails_explicitly(self) -> None:
+        broken = row("2026-09-28")
+        broken["close"] = "not-a-number"
+        fake = FakeBaostock(query_results=[ok(broken)])
+        with pytest.raises(DataQualityError, match="malformed"):
+            self.make(fake).get_label_bars("600000", date(2026, 9, 25), (date(2026, 9, 28),))
+
+    def test_satisfies_label_data_provider_protocol(self) -> None:
+        from kronos_ai.evaluation.benchmark import LabelDataProvider
+
+        provider_instance = self.make(FakeBaostock())
+        try:
+            assert isinstance(provider_instance, LabelDataProvider)
+        finally:
+            provider_instance.close()
