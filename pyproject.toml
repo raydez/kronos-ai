@@ -14,7 +14,18 @@ dependencies = [
 ]
 
 [dependency-groups]
+# Kronos 模型运行时依赖（vendor/ 下上游模型代码 + sampler 需要）。
+# dev 组包含 model 组：sampler 可复现性回归测试属强制 CI 项（§54.2，DoD 32）。
+model = [
+    "einops>=0.7",
+    "huggingface-hub>=0.23",
+    "numpy>=1.26",
+    "safetensors>=0.4",
+    "torch>=2.2",
+    "tqdm>=4.66",
+]
 dev = [
+    { include-group = "model" },
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "ruff>=0.6",
@@ -46,7 +57,9 @@ source = ["src/kronos_ai"]
 line-length = 100
 target-version = "py312"
 src = ["src", "tests"]
-extend-exclude = ["backend", "frontend"]
+# vendor 目录是上游代码的逐字节副本（见 ADR-020 与 vendor/UPSTREAM.md），
+# 不施加本项目风格；v2 逻辑一律写在受控 adapter 中
+extend-exclude = ["backend", "frontend", "src/kronos_ai/forecast/backends/kronos/vendor"]
 
 [tool.ruff.lint]
 select = [
@@ -86,3 +99,8 @@ strict_equality = true
 init_forbid_extra = true
 init_typed = true
 warn_required_dynamic_aliases = true
+
+[[tool.mypy.overrides]]
+# vendor 目录是上游代码逐字节副本（ADR-020），不参与本项目类型门禁
+module = ["kronos_ai.forecast.backends.kronos.vendor.*"]
+ignore_errors = true

@@ -12,10 +12,19 @@ hashing_payload() 的构成属于契约：修改会改变 ForecastArtifactKey（
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from kronos_ai.domain.symbols import validate_normalized_symbol
 from kronos_ai.domain.time import ResearchTime, ensure_shanghai_aware
@@ -24,6 +33,29 @@ FORECAST_CONTRACT_VERSION = "forecast-contract-v1"
 
 # torch.Generator.manual_seed 接受 int64；限定非负可移植范围，负 seed 无额外语义
 MAX_SEED = 2**63 - 1
+
+_HEX256 = re.compile(r"[0-9a-f]{64}")
+
+
+def _require_nonempty(value: str, field: str) -> str:
+    if not value.strip():
+        raise ValueError(f"{field} must be non-empty")
+    return value
+
+
+def _validate_sha256(value: str) -> str:
+    if not _HEX256.fullmatch(value):
+        raise ValueError("hash must be a 64-char lowercase sha256 hex digest")
+    return value
+
+
+Hash256 = Annotated[str, AfterValidator(_validate_sha256)]
+
+
+def _validate_finite(value: float, field: str) -> float:
+    if value != value or value in (float("inf"), float("-inf")):
+        raise ValueError(f"{field} must be finite")
+    return value
 
 
 class SamplingConfig(BaseModel):
@@ -40,9 +72,7 @@ class SamplingConfig(BaseModel):
     @field_validator("temperature")
     @classmethod
     def _temperature_finite(cls, value: float) -> float:
-        if value in (float("inf"), float("-inf")):
-            raise ValueError("temperature must be finite")
-        return value
+        return _validate_finite(value, "temperature")
 
     def hashing_payload(self) -> dict[str, Any]:
         """进入 ForecastArtifactKey 的采样维（§15）；字段顺序由 canonical json 决定。"""
@@ -53,6 +83,29 @@ class SamplingConfig(BaseModel):
             "top_k": self.top_k,
             "top_p": self.top_p,
         }
+
+
+class ModelMetadata(BaseModel):
+    """Forecast 结果的模型 provenance（§9/§14）。
+
+    记录 torch version（编码进 runtime_version）、device、dtype，因为跨设备
+    完全 bitwise reproducibility 不被承诺（§9）；device 取 device-class。
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    backend: str
+    model_id: str
+    revision: str
+    runtime_version: str
+    device: str
+    dtype: str
+    config_hash: Hash256
+
+    @field_validator("backend", "model_id", "revision", "runtime_version", "device", "dtype")
+    @classmethod
+    def _nonempty(cls, value: str, info: ValidationInfo) -> str:
+        return _require_nonempty(value, str(info.field_name))
 
 
 class ForecastRequest(BaseModel):
