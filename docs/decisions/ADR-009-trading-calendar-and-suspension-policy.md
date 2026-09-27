@@ -50,8 +50,21 @@ horizon 越过日历 coverage 或数据末端         → INSUFFICIENT_FUTURE_BA
 - 误传 `datetime`（`date` 的子类，如 `MarketBar.timestamp`）抛 `ConfigurationError`，
   不做静默 `.date()` 截断。
 - 数据源契约：日历必须覆盖 origin 之后至少 `max horizon` 个 session，否则编排层无法
-  生成 ForecastPoint。BaoStock `query_trade_dates` 的实际覆盖范围（是否包含未来日期）
-  由 RX-KAI-006 spike 核实，核实前不得假设其覆盖未来。
+  生成 ForecastPoint。BaoStock `query_trade_dates` 的实际覆盖范围已由 RX-KAI-006 spike
+  核实（`docs/spike/baostock-capability.md` §1）：
+  - 覆盖 `1990-12-19`..**当年度末**（如 2026-12-31），区间内每个自然日都有一行，
+    节假日为 `is_trading_day=0`；年内未来 session 已发布，**跨年不可用**；
+  - 越界区间返回 `error_code=0` + 0 行（静默空），**不是**错误信号；
+  - 因此装载器/调用方必须把「静默空」与「覆盖不足」转成显式 `CalendarError`，
+    禁止把空结果当作「该区间无交易日」；
+  - 年末 origin 且 horizon 跨年是 `INSUFFICIENT_FUTURE_BARS` 的真实来源，
+    属数据源边界而非故障，必须显式失败而不缩短 horizon；
+  - 取数侧旁证：最近窗口（`checks.publication_lag`，`today=2026-09-27`）内三个标的
+    的最后一条 bar 都停在 `2026-09-24`，窗口内的 calendar session 只有
+    `09-17`/`09-18`/`09-21`..`09-24`，而 `2026-09-25`（周五，中秋）与周末
+    `09-26`/`09-27` 在日历上本就不是 session（见 §6），故
+    `sessions_without_bars=[]`，「bar 缺行」与「非交易日」一致，
+    未观测到发布滞后（`docs/spike/baostock-capability.md` §6）。
 
 ### 4. 实现分工与 provenance
 
@@ -61,6 +74,23 @@ horizon 越过日历 coverage 或数据末端         → INSUFFICIENT_FUTURE_BA
 - `exchange` / `source` 为必填 provenance，不提供默认值：任何进入 artifact 的时间轴
   必须能回答「哪个日历、来自哪里」（§3.5）。BaoStock 装载器在 RX-KAI-006 结论之后
   落地，`source` 形如 `baostock:query_trade_dates-v1`。
+
+### 5. 停牌字段实测（RX-KAI-006 spike）
+
+`query_history_k_data_plus` 的 `tradestatus`（`1` 正常 / `0` 停牌）与 `isST` 均可用；
+停牌日**仍返回 bar**，形态为 O=H=L=C（延续前收）。202 个样本停牌行中：202 行 flat OHLC、
+201 行 close 与前一行相同、201 行 `volume=0`，另有 **1 行 `volume` 为空串**
+（`sh.600816`；退市标的 `sz.000003` 的末日 `2002-06-14` 也出现空串 `volume`/`amount`，
+见 ADR-007）。因此「valid bar」只能按 `tradestatus` 与价格有效性构造，不能用「该日有无行」
+推断停牌，也**不能假定数值字段非空**；`isST` 与 `tradestatus` 正交（ST 可正常交易也可停牌）。
+
+### 6. 日历不可用工作日规则替代（实测反例）
+
+`2026-09-25`（星期五，中秋节）在 BaoStock 日历上是 `is_trading_day=0`，其后
+`2026-09-28`..`09-30` 正常开市，`2026-10-01`..`10-07` 为国庆长假。任何「跳过周末」
+式的近似都会把 `2026-09-25` 当作 session，从而让 forecast 时间轴与个股实际可交易日
+错位——这正是本 ADR 要求统一 `TradingCalendar` 真源、禁止 `pandas` 工作日推导的
+直接证据（v1 `kronos_integration.py` 的 `weekday() >= 5` 即属此列）。
 
 ## 后果
 

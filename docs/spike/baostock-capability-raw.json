@@ -1,0 +1,1359 @@
+{
+  "spike": "baostock-capability",
+  "generated_at": "2026-09-27T09:18:42+0800",
+  "timeout_s": 30.0,
+  "checks": {
+    "client_info": {
+      "status": "ok",
+      "confirmed": true,
+      "confirm_criterion": "the active endpoint accepts a TCP connection",
+      "client_version": "00.9.40",
+      "server_host": "public-api.baostock.com",
+      "server_port": 10030,
+      "vip_server_host": "vip-api.baostock.com",
+      "api_key": {
+        "setter_exists": true,
+        "setter_source": "def set_API_key(apiKey=''):\n    \"\"\"\n    设置API_key\n    \"\"\"\n    if apiKey is not None or apiKey != \"\":\n        setattr(conx, \"apiKey\", apiKey)\n",
+        "validator_source": "def valid_API_key(API_key):\n    '''\n    简单的检验API-KEY的正确性；（长度检查，“校验和”检查）\n    BSERR_APIKey_FORMAT_INCORRECT\n    return false:apiKey格式不正确\n    '''\n    # API-KEY是33位字符串，整体设计构造如下：bs-<2位字符串><27位字符串><1位校验和>\n    if API_key is None or not isinstance(API_key, str) or API_key == \"\":\n        print(\"Invalid API_key: empty or not a string\")\n        return False\n\n    if len(API_key) != 33:\n        print(\"Invalid API_key: length must be 33\")\n        return False\n\n    if not API_key.startswith(\"bs-\"):\n        print(\"Invalid API_key: prefix must be 'bs-'\")\n        return False\n\n    role_code = API_key[3:5]\n    payload_b62 = API_key[5:32]   # 27 位\n    checksum = API_key[32]\n\n    body = role_code + payload_b62 + checksum\n    if any(ch not in ALPHABET for ch in body):\n        print(\"Invalid API_key: contains non-Base62 characters\")\n        return False\n\n    expected_checksum = calculate_checksum(role_code, payload_b62)\n    if checksum != expected_checksum:\n        print(\"Invalid API_key: checksum mismatch\")\n        return False\n\n    return True\n",
+        "validator_call_site": [
+          "if(valid_API_key(apiKey) == False):"
+        ],
+        "server_error_code_for_bad_format": "10001012"
+      },
+      "tcp_probe": {
+        "host": "public-api.baostock.com",
+        "connect_ok": true,
+        "elapsed_s": 0.007
+      },
+      "legacy_endpoint_probe": {
+        "host": "www.baostock.com",
+        "connect_ok": true,
+        "elapsed_s": 0.007
+      },
+      "elapsed_s": 0.01
+    },
+    "login": {
+      "status": "ok",
+      "confirmed": true,
+      "confirm_criterion": "login returns a ResultData with error_code == '0'",
+      "error_code": "0",
+      "error_msg": "success",
+      "elapsed_s": 0.09
+    },
+    "trade_dates": {
+      "status": "ok",
+      "confirmed": true,
+      "confirm_criterion": "coverage rows + sessions + holiday window non-empty, beyond-coverage window empty",
+      "error_code": "0",
+      "error_msg": "success",
+      "fields": [
+        "calendar_date",
+        "is_trading_day"
+      ],
+      "rows": 13162,
+      "coverage": [
+        "1990-12-19",
+        "2026-12-31"
+      ],
+      "requested_end": "2027-12-31",
+      "sessions": 8797,
+      "covers_future_sessions": true,
+      "beyond_coverage": {
+        "window": [
+          "2027-01-01",
+          "2027-12-31"
+        ],
+        "error_code": "0",
+        "error_msg": "success",
+        "rows": 0,
+        "silent_empty": true
+      },
+      "holiday_window": {
+        "window": [
+          "2026-09-24",
+          "2026-10-12"
+        ],
+        "rows": [
+          [
+            "2026-09-24",
+            "1"
+          ],
+          [
+            "2026-09-25",
+            "0"
+          ],
+          [
+            "2026-09-26",
+            "0"
+          ],
+          [
+            "2026-09-27",
+            "0"
+          ],
+          [
+            "2026-09-28",
+            "1"
+          ],
+          [
+            "2026-09-29",
+            "1"
+          ],
+          [
+            "2026-09-30",
+            "1"
+          ],
+          [
+            "2026-10-01",
+            "0"
+          ],
+          [
+            "2026-10-02",
+            "0"
+          ],
+          [
+            "2026-10-03",
+            "0"
+          ],
+          [
+            "2026-10-04",
+            "0"
+          ],
+          [
+            "2026-10-05",
+            "0"
+          ],
+          [
+            "2026-10-06",
+            "0"
+          ],
+          [
+            "2026-10-07",
+            "0"
+          ],
+          [
+            "2026-10-08",
+            "1"
+          ],
+          [
+            "2026-10-09",
+            "1"
+          ],
+          [
+            "2026-10-10",
+            "0"
+          ],
+          [
+            "2026-10-11",
+            "0"
+          ],
+          [
+            "2026-10-12",
+            "1"
+          ]
+        ],
+        "sessions": [
+          "2026-09-24",
+          "2026-09-28",
+          "2026-09-29",
+          "2026-09-30",
+          "2026-10-08",
+          "2026-10-09",
+          "2026-10-12"
+        ]
+      },
+      "sample": [
+        [
+          "1990-12-19",
+          "1"
+        ],
+        [
+          "1990-12-20",
+          "1"
+        ],
+        [
+          "1990-12-21",
+          "1"
+        ]
+      ],
+      "elapsed_s": 6.66
+    },
+    "adjust_factor": {
+      "status": "ok",
+      "confirmed": true,
+      "confirm_criterion": "factor table non-empty and identical to the truncated window on shared ex-dates",
+      "code": "sh.600000",
+      "error_code": "0",
+      "error_msg": "success",
+      "fields": [
+        "code",
+        "dividOperateDate",
+        "foreAdjustFactor",
+        "backAdjustFactor",
+        "adjustFactor"
+      ],
+      "windows": {
+        "full": [
+          "2000-01-01",
+          "2027-12-31"
+        ],
+        "truncated": [
+          "2000-01-01",
+          "2022-12-31"
+        ]
+      },
+      "rows_full": 26,
+      "rows_truncated": 22,
+      "coverage": [
+        "2000-07-06",
+        "2026-07-16"
+      ],
+      "shared_ex_dates": 22,
+      "history_rewritten_when_window_changes": false,
+      "rewritten_ex_dates": [],
+      "adjust_and_back_columns_identical": true,
+      "factor_table": [
+        [
+          "sh.600000",
+          "2000-07-06",
+          "0.075297",
+          "1.006502",
+          "1.006502"
+        ],
+        [
+          "sh.600000",
+          "2002-08-22",
+          "0.114219",
+          "1.526763",
+          "1.526763"
+        ],
+        [
+          "sh.600000",
+          "2003-06-23",
+          "0.115174",
+          "1.539529",
+          "1.539529"
+        ],
+        [
+          "sh.600000",
+          "2004-05-20",
+          "0.116539",
+          "1.557777",
+          "1.557777"
+        ],
+        [
+          "sh.600000",
+          "2005-05-12",
+          "0.118554",
+          "1.584713",
+          "1.584713"
+        ],
+        [
+          "sh.600000",
+          "2006-05-25",
+          "0.120116",
+          "1.605586",
+          "1.605586"
+        ],
+        [
+          "sh.600000",
+          "2007-07-18",
+          "0.120613",
+          "1.612242",
+          "1.612242"
+        ],
+        [
+          "sh.600000",
+          "2008-04-24",
+          "0.157530",
+          "2.105701",
+          "2.105701"
+        ],
+        [
+          "sh.600000",
+          "2009-06-09",
+          "0.222168",
+          "2.969727",
+          "2.969727"
+        ],
+        [
+          "sh.600000",
+          "2010-06-10",
+          "0.291085",
+          "3.890931",
+          "3.890931"
+        ],
+        [
+          "sh.600000",
+          "2011-06-03",
+          "0.382991",
+          "5.119442",
+          "5.119442"
+        ],
+        [
+          "sh.600000",
+          "2012-06-26",
+          "0.397264",
+          "5.310229",
+          "5.310229"
+        ],
+        [
+          "sh.600000",
+          "2013-06-03",
+          "0.419289",
+          "5.604647",
+          "5.604647"
+        ],
+        [
+          "sh.600000",
+          "2014-06-24",
+          "0.450037",
+          "6.015655",
+          "6.015655"
+        ],
+        [
+          "sh.600000",
+          "2015-06-23",
+          "0.471008",
+          "6.295967",
+          "6.295967"
+        ],
+        [
+          "sh.600000",
+          "2016-06-23",
+          "0.533312",
+          "7.128788",
+          "7.128788"
+        ],
+        [
+          "sh.600000",
+          "2017-05-25",
+          "0.702156",
+          "9.385732",
+          "9.385732"
+        ],
+        [
+          "sh.600000",
+          "2018-07-13",
+          "0.709571",
+          "9.484842",
+          "9.484842"
+        ],
+        [
+          "sh.600000",
+          "2019-06-11",
+          "0.731627",
+          "9.779664",
+          "9.779664"
+        ],
+        [
+          "sh.600000",
+          "2020-07-23",
+          "0.771461",
+          "10.312133",
+          "10.312133"
+        ],
+        [
+          "sh.600000",
+          "2021-07-21",
+          "0.810399",
+          "10.832619",
+          "10.832619"
+        ],
+        [
+          "sh.600000",
+          "2022-07-21",
+          "0.855421",
+          "11.434431",
+          "11.434431"
+        ],
+        [
+          "sh.600000",
+          "2023-07-21",
+          "0.893976",
+          "11.949786",
+          "11.949786"
+        ],
+        [
+          "sh.600000",
+          "2024-07-18",
+          "0.926782",
+          "12.388310",
+          "12.388310"
+        ],
+        [
+          "sh.600000",
+          "2025-07-16",
+          "0.954887",
+          "12.763991",
+          "12.763991"
+        ],
+        [
+          "sh.600000",
+          "2026-07-16",
+          "1.000000",
+          "13.367013",
+          "13.367013"
+        ]
+      ],
+      "elapsed_s": 0.48
+    },
+    "factor_normalization": {
+      "status": "ok",
+      "confirmed": true,
+      "confirm_criterion": "every symbol's latest foreAdjustFactor equals 1.0",
+      "codes": {
+        "sh.600000": {
+          "error_code": "0",
+          "records": 26,
+          "latest_ex_date": "2026-07-16",
+          "latest_fore_factor": "1.000000",
+          "latest_fore_is_unity": true
+        },
+        "sz.000001": {
+          "error_code": "0",
+          "records": 25,
+          "latest_ex_date": "2026-09-24",
+          "latest_fore_factor": "1.000000",
+          "latest_fore_is_unity": true
+        },
+        "sh.600519": {
+          "error_code": "0",
+          "records": 31,
+          "latest_ex_date": "2026-06-26",
+          "latest_fore_factor": "1.000000",
+          "latest_fore_is_unity": true
+        },
+        "sz.300750": {
+          "error_code": "0",
+          "records": 12,
+          "latest_ex_date": "2026-08-10",
+          "latest_fore_factor": "1.000000",
+          "latest_fore_is_unity": true
+        },
+        "sz.000002": {
+          "error_code": "0",
+          "records": 30,
+          "latest_ex_date": "2025-01-09",
+          "latest_fore_factor": "1.000000",
+          "latest_fore_is_unity": true
+        },
+        "sh.601318": {
+          "error_code": "0",
+          "records": 40,
+          "latest_ex_date": "2026-09-10",
+          "latest_fore_factor": "1.000000",
+          "latest_fore_is_unity": true
+        }
+      },
+      "all_latest_fore_unity": true,
+      "interpretation": "latest foreAdjustFactor == 1.0 across symbols → the factor table is normalized to the most recent corporate action at query time; adjusted series derived from it are query-time dependent and not PIT-reproducible without snapshots",
+      "elapsed_s": 1.25
+    },
+    "factor_price_mapping": {
+      "status": "ok",
+      "confirmed": true,
+      "confirm_criterion": ">0 checked symbol-days and zero hfq/qfq mapping mismatches",
+      "rule": "hfq(D) = raw(D) * backAdjustFactor(latest ex_date <= D); qfq(D) = raw(D) * foreAdjustFactor(latest ex_date <= D)",
+      "probes": {
+        "sh.600000": {
+          "window": [
+            "2000-01-04",
+            "2000-06-30"
+          ],
+          "first_factor_ex_date": "1999-11-10",
+          "days_in_window": 114,
+          "checked_days": 114,
+          "days_before_first_ex_date": 0,
+          "hfq_mismatch": 0,
+          "qfq_mismatch": 0
+        },
+        "sz.000002": {
+          "window": [
+            "2000-01-04",
+            "2001-12-31"
+          ],
+          "first_factor_ex_date": "1991-01-29",
+          "days_in_window": 479,
+          "checked_days": 479,
+          "days_before_first_ex_date": 0,
+          "hfq_mismatch": 0,
+          "qfq_mismatch": 0
+        },
+        "sh.600519": {
+          "window": [
+            "2001-09-03",
+            "2002-12-31"
+          ],
+          "first_factor_ex_date": "2001-08-27",
+          "days_in_window": 318,
+          "checked_days": 318,
+          "days_before_first_ex_date": 0,
+          "hfq_mismatch": 0,
+          "qfq_mismatch": 0
+        },
+        "sz.300750": {
+          "window": [
+            "2018-06-11",
+            "2019-12-31"
+          ],
+          "first_factor_ex_date": "2018-06-11",
+          "days_in_window": 382,
+          "checked_days": 382,
+          "days_before_first_ex_date": 0,
+          "hfq_mismatch": 0,
+          "qfq_mismatch": 0
+        },
+        "sh.601318": {
+          "window": [
+            "2007-03-02",
+            "2008-12-31"
+          ],
+          "first_factor_ex_date": "2007-03-01",
+          "days_in_window": 452,
+          "checked_days": 452,
+          "days_before_first_ex_date": 0,
+          "hfq_mismatch": 0,
+          "qfq_mismatch": 0
+        }
+      },
+      "total_checked_days": 1745,
+      "total_mismatches": 0,
+      "rule_holds": true,
+      "sample_day": {
+        "code": "sh.600000",
+        "day": "2023-01-03",
+        "closes": {
+          "raw": 7.23,
+          "hfq": 82.67093613,
+          "qfq": 6.18469383
+        },
+        "applicable_ex_date": "2022-07-21",
+        "applicable_fore_factor": "0.855421",
+        "applicable_back_factor": "11.434431",
+        "hfq_over_raw": 11.434431,
+        "qfq_over_raw": 0.8554209999999999
+      },
+      "elapsed_s": 8.27
+    },
+    "index_constituents": {
+      "status": "ok",
+      "confirmed": true,
+      "confirm_criterion": "latest lists match index sizes, at least one historical probe is non-empty, and the future-date probe returns the latest list unchanged",
+      "hs300": {
+        "error_code": "0",
+        "error_msg": "success",
+        "fields": [
+          "updateDate",
+          "code",
+          "code_name"
+        ],
+        "latest_rows": 300,
+        "latest_update_dates": [
+          "2026-09-21"
+        ],
+        "by_probe_date": {
+          "2005-06-30": {
+            "error_code": "0",
+            "rows": 0,
+            "update_dates": [],
+            "diff_vs_latest": 300,
+            "empty": true
+          },
+          "2005-12-30": {
+            "error_code": "0",
+            "rows": 0,
+            "update_dates": [],
+            "diff_vs_latest": 300,
+            "empty": true
+          },
+          "2006-01-04": {
+            "error_code": "0",
+            "rows": 300,
+            "update_dates": [
+              "2006-01-02"
+            ],
+            "diff_vs_latest": 490,
+            "empty": false
+          },
+          "2006-06-20": {
+            "error_code": "0",
+            "rows": 300,
+            "update_dates": [
+              "2006-06-19"
+            ],
+            "diff_vs_latest": 486,
+            "empty": false
+          },
+          "2006-06-30": {
+            "error_code": "0",
+            "rows": 300,
+            "update_dates": [
+              "2006-06-26"
+            ],
+            "diff_vs_latest": 486,
+            "empty": false
+          },
+          "2007-01-04": {
+            "error_code": "0",
+            "rows": 300,
+            "update_dates": [
+              "2007-01-01"
+            ],
+            "diff_vs_latest": 464,
+            "empty": false
+          },
+          "2007-01-31": {
+            "error_code": "0",
+            "rows": 300,
+            "update_dates": [
+              "2007-01-29"
+            ],
+            "diff_vs_latest": 454,
+            "empty": false
+          },
+          "2008-06-30": {
+            "error_code": "0",
+            "rows": 300,
+            "update_dates": [
+              "2008-06-30"
+            ],
+            "diff_vs_latest": 432,
+            "empty": false
+          },
+          "2020-06-30": {
+            "error_code": "0",
+            "rows": 300,
+            "update_dates": [
+              "2020-06-29"
+            ],
+            "diff_vs_latest": 208,
+            "empty": false
+          }
+        },
+        "future_date_probe": {
+          "date": "2027-06-30",
+          "error_code": "0",
+          "rows": 300,
+          "update_dates": [
+            "2026-09-21"
+          ],
+          "same_set_as_latest": true
+        },
+        "sample": [
+          [
+            "2026-09-21",
+            "sh.600000",
+            "浦发银行"
+          ],
+          [
+            "2026-09-21",
+            "sh.600009",
+            "上海机场"
+          ]
+        ]
+      },
+      "zz500": {
+        "error_code": "0",
+        "error_msg": "success",
+        "fields": [
+          "updateDate",
+          "code",
+          "code_name"
+        ],
+        "latest_rows": 500,
+        "latest_update_dates": [
+          "2026-09-21"
+        ],
+        "by_probe_date": {
+          "2005-06-30": {
+            "error_code": "0",
+            "rows": 0,
+            "update_dates": [],
+            "diff_vs_latest": 500,
+            "empty": true
+          },
+          "2005-12-30": {
+            "error_code": "0",
+            "rows": 0,
+            "update_dates": [],
+            "diff_vs_latest": 500,
+            "empty": true
+          },
+          "2006-01-04": {
+            "error_code": "0",
+            "rows": 0,
+            "update_dates": [],
+            "diff_vs_latest": 500,
+            "empty": true
+          },
+          "2006-06-20": {
+            "error_code": "0",
+            "rows": 0,
+            "update_dates": [],
+            "diff_vs_latest": 500,
+            "empty": true
+          },
+          "2006-06-30": {
+            "error_code": "0",
+            "rows": 0,
+            "update_dates": [],
+            "diff_vs_latest": 500,
+            "empty": true
+          },
+          "2007-01-04": {
+            "error_code": "0",
+            "rows": 0,
+            "update_dates": [],
+            "diff_vs_latest": 500,
+            "empty": true
+          },
+          "2007-01-31": {
+            "error_code": "0",
+            "rows": 500,
+            "update_dates": [
+              "2007-01-29"
+            ],
+            "diff_vs_latest": 906,
+            "empty": false
+          },
+          "2008-06-30": {
+            "error_code": "0",
+            "rows": 500,
+            "update_dates": [
+              "2008-06-30"
+            ],
+            "diff_vs_latest": 892,
+            "empty": false
+          },
+          "2020-06-30": {
+            "error_code": "0",
+            "rows": 500,
+            "update_dates": [
+              "2020-06-29"
+            ],
+            "diff_vs_latest": 642,
+            "empty": false
+          }
+        },
+        "future_date_probe": {
+          "date": "2027-06-30",
+          "error_code": "0",
+          "rows": 500,
+          "update_dates": [
+            "2026-09-21"
+          ],
+          "same_set_as_latest": true
+        },
+        "sample": [
+          [
+            "2026-09-21",
+            "sh.600004",
+            "白云机场"
+          ],
+          [
+            "2026-09-21",
+            "sh.600008",
+            "首创环保"
+          ]
+        ]
+      },
+      "elapsed_s": 10.19
+    },
+    "suspension": {
+      "status": "ok",
+      "confirmed": true,
+      "confirm_criterion": "at least one suspended row exists and every suspended row carries flat OHLC",
+      "codes": {
+        "sh.600000": {
+          "error_code": "0",
+          "fields": [
+            "date",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "amount",
+            "tradestatus",
+            "isST"
+          ],
+          "rows": 2431,
+          "tradestatus_values": {
+            "1": 2399,
+            "0": 32
+          },
+          "suspended_rows": 32,
+          "suspended_flat_ohlc": 32,
+          "suspended_repeats_prev_close": 32,
+          "suspended_volume_zero": 32,
+          "suspended_empty_volume": 0,
+          "suspended_amount_zero": 32,
+          "suspended_sample": [
+            [
+              "2015-06-08",
+              "18.4300",
+              "18.4300",
+              "18.4300",
+              "18.4300",
+              "0",
+              "0.0000",
+              "0",
+              "0"
+            ],
+            [
+              "2015-06-09",
+              "18.4300",
+              "18.4300",
+              "18.4300",
+              "18.4300",
+              "0",
+              "0.0000",
+              "0",
+              "0"
+            ]
+          ],
+          "isST_rows": 0,
+          "isST_sample": []
+        },
+        "sh.600816": {
+          "error_code": "0",
+          "fields": [
+            "date",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "amount",
+            "tradestatus",
+            "isST"
+          ],
+          "rows": 2431,
+          "tradestatus_values": {
+            "1": 2362,
+            "0": 69
+          },
+          "suspended_rows": 69,
+          "suspended_flat_ohlc": 69,
+          "suspended_repeats_prev_close": 69,
+          "suspended_volume_zero": 68,
+          "suspended_empty_volume": 1,
+          "suspended_amount_zero": 69,
+          "suspended_sample": [
+            [
+              "2015-07-08",
+              "36.1000",
+              "36.1000",
+              "36.1000",
+              "36.1000",
+              "0",
+              "0.0000",
+              "0",
+              "0"
+            ],
+            [
+              "2015-07-09",
+              "36.1000",
+              "36.1000",
+              "36.1000",
+              "36.1000",
+              "0",
+              "0.0000",
+              "0",
+              "0"
+            ]
+          ],
+          "isST_rows": 852,
+          "isST_sample": [
+            [
+              "2020-05-06",
+              "2.5000",
+              "2.5000",
+              "2.5000",
+              "2.5000",
+              "0",
+              "0.0000",
+              "0",
+              "1"
+            ],
+            [
+              "2020-05-07",
+              "2.5000",
+              "2.5000",
+              "2.5000",
+              "2.5000",
+              "0",
+              "0.0000",
+              "0",
+              "1"
+            ]
+          ]
+        },
+        "sz.000010": {
+          "error_code": "0",
+          "fields": [
+            "date",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "amount",
+            "tradestatus",
+            "isST"
+          ],
+          "rows": 2431,
+          "tradestatus_values": {
+            "0": 101,
+            "1": 2330
+          },
+          "suspended_rows": 101,
+          "suspended_flat_ohlc": 101,
+          "suspended_repeats_prev_close": 100,
+          "suspended_volume_zero": 101,
+          "suspended_empty_volume": 0,
+          "suspended_amount_zero": 101,
+          "suspended_sample": [
+            [
+              "2015-01-05",
+              "7.4000",
+              "7.4000",
+              "7.4000",
+              "7.4000",
+              "0",
+              "0.0000",
+              "0",
+              "0"
+            ],
+            [
+              "2015-01-06",
+              "7.4000",
+              "7.4000",
+              "7.4000",
+              "7.4000",
+              "0",
+              "0.0000",
+              "0",
+              "0"
+            ]
+          ],
+          "isST_rows": 300,
+          "isST_sample": [
+            [
+              "2019-04-26",
+              "3.4300",
+              "3.4300",
+              "3.4300",
+              "3.4300",
+              "786200",
+              "2696666.0000",
+              "1",
+              "1"
+            ],
+            [
+              "2019-04-29",
+              "3.2600",
+              "3.2600",
+              "3.2600",
+              "3.2600",
+              "1234100",
+              "4023166.0000",
+              "1",
+              "1"
+            ]
+          ]
+        }
+      },
+      "total_suspended_rows": 202,
+      "total_flat_ohlc": 202,
+      "total_repeats_prev_close": 201,
+      "total_volume_zero": 201,
+      "total_amount_zero": 202,
+      "total_empty_volume": 1,
+      "elapsed_s": 3.6
+    },
+    "symbol_lifecycle": {
+      "status": "ok",
+      "confirmed": true,
+      "confirm_criterion": "query_stock_basic gives non-empty outDate; factor rows exist from 1990 but not from 2000; history rows in the delisting window are all tradestatus=0",
+      "code": "sz.000003",
+      "stock_basic": {
+        "error_code": "0",
+        "error_msg": "success",
+        "fields": [
+          "code",
+          "code_name",
+          "ipoDate",
+          "outDate",
+          "type",
+          "status"
+        ],
+        "rows": [
+          [
+            "sz.000003",
+            "PT金田A",
+            "1991-07-03",
+            "2002-06-14",
+            "1",
+            "0"
+          ]
+        ]
+      },
+      "listed_reference": {
+        "code": "sh.600000",
+        "error_code": "0",
+        "error_msg": "success",
+        "rows": [
+          [
+            "sh.600000",
+            "浦发银行",
+            "1999-11-10",
+            "",
+            "1",
+            "1"
+          ]
+        ]
+      },
+      "adjust_factor": {
+        "error_code": "0",
+        "error_msg": "success",
+        "fields": [
+          "code",
+          "dividOperateDate",
+          "foreAdjustFactor",
+          "backAdjustFactor",
+          "adjustFactor"
+        ],
+        "from_1990": {
+          "window": [
+            "1990-01-01",
+            "2027-12-31"
+          ],
+          "rows": 15,
+          "coverage": [
+            "1991-07-03",
+            "1996-07-29"
+          ]
+        },
+        "from_2000": {
+          "window": [
+            "2000-01-01",
+            "2027-12-31"
+          ],
+          "error_code": "0",
+          "error_msg": "success",
+          "rows": 0,
+          "note": "empty window is an artifact of the window, not a delisting signal"
+        }
+      },
+      "history": {
+        "window": [
+          "2002-06-01",
+          "2002-06-30"
+        ],
+        "error_code": "0",
+        "error_msg": "success",
+        "fields": [
+          "date",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume",
+          "amount",
+          "tradestatus"
+        ],
+        "rows": 10,
+        "table": [
+          [
+            "2002-06-03",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "0",
+            "0.0000",
+            "0"
+          ],
+          [
+            "2002-06-04",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "0",
+            "0.0000",
+            "0"
+          ],
+          [
+            "2002-06-05",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "0",
+            "0.0000",
+            "0"
+          ],
+          [
+            "2002-06-06",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "0",
+            "0.0000",
+            "0"
+          ],
+          [
+            "2002-06-07",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "0",
+            "0.0000",
+            "0"
+          ],
+          [
+            "2002-06-10",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "0",
+            "0.0000",
+            "0"
+          ],
+          [
+            "2002-06-11",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "0",
+            "0.0000",
+            "0"
+          ],
+          [
+            "2002-06-12",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "0",
+            "0.0000",
+            "0"
+          ],
+          [
+            "2002-06-13",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "0",
+            "0.0000",
+            "0"
+          ],
+          [
+            "2002-06-14",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "2.7100",
+            "",
+            "",
+            "0"
+          ]
+        ],
+        "suspended_rows": 10,
+        "flat_ohlc_rows": 10,
+        "volume_zero_rows": 9,
+        "empty_numeric_field_rows": [
+          {
+            "row": [
+              "2002-06-14",
+              "2.7100",
+              "2.7100",
+              "2.7100",
+              "2.7100",
+              "",
+              "",
+              "0"
+            ],
+            "empty_volume": true,
+            "empty_amount": true
+          }
+        ]
+      },
+      "elapsed_s": 1.17
+    },
+    "publication_lag": {
+      "status": "ok",
+      "confirmed": true,
+      "confirm_criterion": "calendar sessions non-empty and all codes agree on the same last bar day",
+      "today": "2026-09-27",
+      "window": [
+        "2026-09-17",
+        "2026-09-27"
+      ],
+      "calendar_sessions": [
+        "2026-09-17",
+        "2026-09-18",
+        "2026-09-21",
+        "2026-09-22",
+        "2026-09-23",
+        "2026-09-24"
+      ],
+      "codes": {
+        "sh.600000": {
+          "error_code": "0",
+          "rows": 6,
+          "bar_days": [
+            "2026-09-17",
+            "2026-09-18",
+            "2026-09-21",
+            "2026-09-22",
+            "2026-09-23",
+            "2026-09-24"
+          ],
+          "last_bar_day": "2026-09-24"
+        },
+        "sz.000001": {
+          "error_code": "0",
+          "rows": 6,
+          "bar_days": [
+            "2026-09-17",
+            "2026-09-18",
+            "2026-09-21",
+            "2026-09-22",
+            "2026-09-23",
+            "2026-09-24"
+          ],
+          "last_bar_day": "2026-09-24"
+        },
+        "sz.300750": {
+          "error_code": "0",
+          "rows": 6,
+          "bar_days": [
+            "2026-09-17",
+            "2026-09-18",
+            "2026-09-21",
+            "2026-09-22",
+            "2026-09-23",
+            "2026-09-24"
+          ],
+          "last_bar_day": "2026-09-24"
+        }
+      },
+      "sessions_without_bars": [],
+      "last_bar_day_consistent": true,
+      "elapsed_s": 0.61
+    },
+    "error_semantics": {
+      "status": "ok",
+      "confirmed": true,
+      "confirm_criterion": "every probe matches its declared expectation",
+      "probes": {
+        "unknown_symbol": {
+          "expectation": "silent_empty",
+          "matches_expectation": true,
+          "error_code": "0",
+          "error_msg": "success",
+          "rows": 0,
+          "silent_empty": true,
+          "sample_rows": []
+        },
+        "malformed_start_date": {
+          "expectation": "client_none",
+          "matches_expectation": true,
+          "error_code": "CLIENT_RETURNED_NONE",
+          "error_msg": "client-side validation rejected the request",
+          "rows": 0,
+          "silent_empty": false,
+          "sample_rows": []
+        },
+        "start_after_end": {
+          "expectation": "server_error",
+          "matches_expectation": true,
+          "error_code": "10004009",
+          "error_msg": "起始日期大于终止日期，请修改。",
+          "rows": 0,
+          "silent_empty": false,
+          "sample_rows": []
+        },
+        "unknown_field": {
+          "expectation": "server_error",
+          "matches_expectation": true,
+          "error_code": "10004012",
+          "error_msg": "日线指标参数传入错误:nosuchfield",
+          "rows": 0,
+          "silent_empty": false,
+          "sample_rows": []
+        },
+        "unknown_adjustflag": {
+          "expectation": "server_error",
+          "matches_expectation": true,
+          "error_code": "10004012",
+          "error_msg": "请求复权类型不正确",
+          "rows": 0,
+          "silent_empty": false,
+          "sample_rows": []
+        },
+        "fully_future_window": {
+          "expectation": "silent_empty",
+          "matches_expectation": true,
+          "error_code": "0",
+          "error_msg": "success",
+          "rows": 0,
+          "silent_empty": true,
+          "sample_rows": []
+        },
+        "adjustfactor_unknown_symbol": {
+          "expectation": "silent_empty",
+          "matches_expectation": true,
+          "error_code": "0",
+          "error_msg": "success",
+          "rows": 0,
+          "silent_empty": true,
+          "sample_rows": []
+        },
+        "trade_dates_holiday_single_day": {
+          "expectation": "ok_non_trading_row",
+          "matches_expectation": true,
+          "error_code": "0",
+          "error_msg": "success",
+          "rows": 1,
+          "silent_empty": false,
+          "sample_rows": [
+            [
+              "2026-10-01",
+              "0"
+            ]
+          ]
+        },
+        "trade_dates_mid_autumn_single_day": {
+          "expectation": "ok_non_trading_row",
+          "matches_expectation": true,
+          "error_code": "0",
+          "error_msg": "success",
+          "rows": 1,
+          "silent_empty": false,
+          "sample_rows": [
+            [
+              "2026-09-25",
+              "0"
+            ]
+          ]
+        }
+      },
+      "mismatches": [],
+      "elapsed_s": 0.14
+    }
+  },
+  "errors": [],
+  "unverified": [],
+  "checks_total": 11,
+  "checks_ok": 11,
+  "status": "ok"
+}

@@ -7,7 +7,7 @@ requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Kronos-AI maintainers" }]
 dependencies = [
-    "baostock==0.8.9",
+    "baostock==0.9.4",
     "pandas>=2.1",
     "pydantic>=2.5,<3",
     "tzdata>=2026.4",
