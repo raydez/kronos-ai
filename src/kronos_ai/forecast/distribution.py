@@ -106,9 +106,7 @@ class DistributionSpec(BaseModel):
                 }
                 for t in self.thresholds
             ],
-            "quantiles": [
-                {"metric": q.metric, "quantile": q.quantile} for q in self.quantiles
-            ],
+            "quantiles": [{"metric": q.metric, "quantile": q.quantile} for q in self.quantiles],
         }
 
 
@@ -120,8 +118,7 @@ DEFAULT_DISTRIBUTION_SPEC = DistributionSpec(
         ThresholdSpec(metric="horizon_return", operator="lt", threshold=-0.02),
     ),
     quantiles=tuple(
-        QuantileSpec(metric="horizon_return", quantile=q)
-        for q in (0.05, 0.25, 0.5, 0.75, 0.95)
+        QuantileSpec(metric="horizon_return", quantile=q) for q in (0.05, 0.25, 0.5, 0.75, 0.95)
     ),
 )
 
@@ -167,9 +164,7 @@ def forecast_samples_from_raw(raw: RawSampleSet) -> tuple[ForecastSample, ...]:
 
     samples: list[ForecastSample] = []
     for sample_id in range(raw.sample_count):
-        points = tuple(
-            _point_at(raw, sample_id, step, index) for step in range(raw.horizon)
-        )
+        points = tuple(_point_at(raw, sample_id, step, index) for step in range(raw.horizon))
         samples.append(ForecastSample(sample_id=sample_id, points=points))
     return tuple(samples)
 
@@ -247,9 +242,7 @@ def _feature_index(feature_names: Sequence[str]) -> dict[str, int]:
     return index
 
 
-def _point_at(
-    raw: RawSampleSet, sample_id: int, step: int, index: dict[str, int]
-) -> ForecastPoint:
+def _point_at(raw: RawSampleSet, sample_id: int, step: int, index: dict[str, int]) -> ForecastPoint:
     row = raw.values[sample_id, step]
     return ForecastPoint(
         timestamp=_session_close(raw.future_sessions[step]),

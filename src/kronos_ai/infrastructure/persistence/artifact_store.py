@@ -55,17 +55,13 @@ _ARTIFACT_COLUMNS = (
     "run_id, name, relative_path, media_type, sha256, size_bytes, row_count, "
     "schema_hash, created_at, metadata_json"
 )
-_ARTIFACT_INSERT_SQL = (
-    f"INSERT INTO artifacts ({_ARTIFACT_COLUMNS}) VALUES ({', '.join('?' * 10)})"
-)
+_ARTIFACT_INSERT_SQL = f"INSERT INTO artifacts ({_ARTIFACT_COLUMNS}) VALUES ({', '.join('?' * 10)})"
 _ARTIFACT_SELECT_SQL = f"SELECT {_ARTIFACT_COLUMNS} FROM artifacts"
 _SNAPSHOT_COLUMNS = (
     "dataset_version, name, relative_path, media_type, sha256, size_bytes, "
     "created_at, metadata_json"
 )
-_SNAPSHOT_INSERT_SQL = (
-    f"INSERT INTO snapshots ({_SNAPSHOT_COLUMNS}) VALUES ({', '.join('?' * 8)})"
-)
+_SNAPSHOT_INSERT_SQL = f"INSERT INTO snapshots ({_SNAPSHOT_COLUMNS}) VALUES ({', '.join('?' * 8)})"
 _SNAPSHOT_SELECT_SQL = f"SELECT {_SNAPSHOT_COLUMNS} FROM snapshots"
 
 
@@ -518,8 +514,15 @@ class ArtifactStore:
         if not created:
             raise self._conflict_error(run_id, name, path)
         record = self._make_record(
-            run_id, name, filename, media_type, digest, len(data),
-            row_count, schema_hash, validated_metadata,
+            run_id,
+            name,
+            filename,
+            media_type,
+            digest,
+            len(data),
+            row_count,
+            schema_hash,
+            validated_metadata,
         )
         self._index_artifact(record, path)
         return record
@@ -543,8 +546,15 @@ class ArtifactStore:
         if stamp is None:
             raise self._conflict_error(run_id, name, path)
         record = self._make_record(
-            run_id, name, filename, media_type, stamp.sha256, stamp.size_bytes,
-            row_count, schema_hash, validated_metadata,
+            run_id,
+            name,
+            filename,
+            media_type,
+            stamp.sha256,
+            stamp.size_bytes,
+            row_count,
+            schema_hash,
+            validated_metadata,
         )
         self._index_artifact(record, path)
         return record

@@ -71,9 +71,7 @@ def test_encode_rejects_wrong_randomness_length() -> None:
 
 
 def test_new_ulid_is_reproducible_with_injected_inputs() -> None:
-    assert (
-        new_ulid(timestamp_ms=GOLDEN_TIMESTAMP_MS, randomness=GOLDEN_RANDOMNESS) == GOLDEN_ULID
-    )
+    assert new_ulid(timestamp_ms=GOLDEN_TIMESTAMP_MS, randomness=GOLDEN_RANDOMNESS) == GOLDEN_ULID
 
 
 def test_is_ulid_rejects_non_string() -> None:
@@ -82,7 +80,9 @@ def test_is_ulid_rejects_non_string() -> None:
 
 
 def test_generator_is_strictly_increasing_within_same_millisecond() -> None:
-    generator = UlidGenerator(time_source=lambda: 1_700_000_000_000, random_source=lambda _: b"\x00" * 10)
+    generator = UlidGenerator(
+        time_source=lambda: 1_700_000_000_000, random_source=lambda _: b"\x00" * 10
+    )
     ids = [generator.new() for _ in range(5)]
     assert ids == sorted(ids)
     assert len(set(ids)) == 5

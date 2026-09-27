@@ -169,9 +169,7 @@ def test_run_forecast_end_to_end(
     factory = make_service_factory(runtime, session_calendar, history)
     output = tmp_path / "result.json"
 
-    args = forecast_args(
-        samples=4, horizon=3, seed=20260927, json=as_json, output=str(output)
-    )
+    args = forecast_args(samples=4, horizon=3, seed=20260927, json=as_json, output=str(output))
     assert commands.run_forecast(args, service_factory=factory) == 0
     stdout = capsys.readouterr().out
 
@@ -315,9 +313,7 @@ def _seed_run(
         if with_metadata:
             store.write_json(run_id, "metadata", {"run_id": run_id, "kind": kind})
         if status != "pending":
-            registry.update_status(
-                run_id, status, now=datetime(2026, 9, 25, 18, 5, tzinfo=CN_TZ)
-            )
+            registry.update_status(run_id, status, now=datetime(2026, 9, 25, 18, 5, tzinfo=CN_TZ))
     finally:
         database.close()
 
@@ -328,9 +324,7 @@ def test_run_show_reports_registered_run(
     run_id = "01ARZ3NDEKTSV4RRFFQ69G5FA0"
     _seed_run(tmp_path, run_id)
     parser = build_parser()
-    args = parser.parse_args(
-        ["run", "show", run_id, "--artifacts-dir", str(tmp_path), "--json"]
-    )
+    args = parser.parse_args(["run", "show", run_id, "--artifacts-dir", str(tmp_path), "--json"])
     assert commands.run_show(args) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["run"]["run_id"] == run_id
@@ -377,9 +371,7 @@ def test_run_read_only_commands_do_not_create_store(tmp_path: Path) -> None:
     assert not (tmp_path / "index.sqlite3").exists()
 
 
-def test_run_list_filters_and_json(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_run_list_filters_and_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     _seed_run(tmp_path, "01ARZ3NDEKTSV4RRFFQ69G5FA0", kind="forecast", status="succeeded")
     _seed_run(tmp_path, "01ARZ3NDEKTSV4RRFFQ69G5FA1", kind="forecast", status="failed")
     _seed_run(tmp_path, "01ARZ3NDEKTSV4RRFFQ69G5FA2", kind="benchmark", status="succeeded")

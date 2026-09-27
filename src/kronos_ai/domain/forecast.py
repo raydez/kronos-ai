@@ -478,11 +478,11 @@ class ForecastDistribution(BaseModel):
 
     @model_validator(mode="after")
     def _no_duplicate_entries(self) -> ForecastDistribution:
-        threshold_keys = [
-            (t.metric, t.operator, t.threshold) for t in self.threshold_probabilities
-        ]
+        threshold_keys = [(t.metric, t.operator, t.threshold) for t in self.threshold_probabilities]
         if len(set(threshold_keys)) != len(threshold_keys):
-            raise ValueError("threshold_probabilities contains duplicate (metric, operator, threshold)")
+            raise ValueError(
+                "threshold_probabilities contains duplicate (metric, operator, threshold)"
+            )
         quantile_keys = [(q.metric, q.quantile) for q in self.quantiles]
         if len(set(quantile_keys)) != len(quantile_keys):
             raise ValueError("quantiles contains duplicate (metric, quantile)")
@@ -584,7 +584,6 @@ class ForecastResult(BaseModel):
         expected_ids = list(range(self.distribution.sample_count))
         if actual_ids != expected_ids:
             raise ValueError(
-                "samples sample_id must be contiguous 0..sample_count-1 in order; "
-                f"got {actual_ids}"
+                f"samples sample_id must be contiguous 0..sample_count-1 in order; got {actual_ids}"
             )
         return self

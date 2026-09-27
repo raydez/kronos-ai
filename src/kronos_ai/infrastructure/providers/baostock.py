@@ -734,9 +734,7 @@ class BaoStockTradingCalendarLoader(_BaostockSessionClient):
         baostock_module: ModuleType | None = None,
         hard_timeout_seconds: float = BAOSTOCK_HARD_TIMEOUT_SECONDS,
     ) -> None:
-        super().__init__(
-            baostock_module=baostock_module, hard_timeout_seconds=hard_timeout_seconds
-        )
+        super().__init__(baostock_module=baostock_module, hard_timeout_seconds=hard_timeout_seconds)
 
     def load(
         self,
@@ -768,13 +766,10 @@ class BaoStockTradingCalendarLoader(_BaostockSessionClient):
                 ) from exc
             if is_trading not in {"0", "1"}:
                 raise DataQualityError(
-                    f"baostock trade-date row #{idx} has unknown is_trading_day "
-                    f"{is_trading!r}"
+                    f"baostock trade-date row #{idx} has unknown is_trading_day {is_trading!r}"
                 )
             if day in seen:
-                raise DataQualityError(
-                    f"baostock trade-date response repeats calendar_date {day}"
-                )
+                raise DataQualityError(f"baostock trade-date response repeats calendar_date {day}")
             seen.add(day)
             if is_trading == "1":
                 sessions.append(day)

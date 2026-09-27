@@ -153,7 +153,9 @@ class RunRegistry:
             try:
                 connection.execute(_INSERT_SQL, _record_params(record))
             except sqlite3.IntegrityError as exc:
-                raise ArtifactError(f"run {record.run_id!r} conflicts with an existing run: {exc}") from exc
+                raise ArtifactError(
+                    f"run {record.run_id!r} conflicts with an existing run: {exc}"
+                ) from exc
         return record
 
     def submit(self, record: RunRecord) -> tuple[RunRecord, bool]:

@@ -86,7 +86,9 @@ def test_horizon_return_and_thresholds() -> None:
     assert dist.median_return == pytest.approx(0.1)
     assert dist.forecast_dispersion == pytest.approx(pop_std([0.1, -0.1, 0.2]))
 
-    probs = {(t.metric, t.operator, t.threshold): t.probability for t in dist.threshold_probabilities}
+    probs = {
+        (t.metric, t.operator, t.threshold): t.probability for t in dist.threshold_probabilities
+    }
     assert probs[("horizon_return", "gt", -0.02)] == pytest.approx(2 / 3)
     assert probs[("horizon_return", "gt", 0.0)] == pytest.approx(2 / 3)
     assert probs[("horizon_return", "gt", 0.02)] == pytest.approx(2 / 3)
@@ -167,10 +169,14 @@ class TestDistributionSpecHash:
 
     def test_hash_changes_with_operator_only(self) -> None:
         left = distribution_spec_hash(
-            DistributionSpec(thresholds=(ThresholdSpec(metric="horizon_return", operator="gt", threshold=0.0),))
+            DistributionSpec(
+                thresholds=(ThresholdSpec(metric="horizon_return", operator="gt", threshold=0.0),)
+            )
         )
         right = distribution_spec_hash(
-            DistributionSpec(thresholds=(ThresholdSpec(metric="horizon_return", operator="gte", threshold=0.0),))
+            DistributionSpec(
+                thresholds=(ThresholdSpec(metric="horizon_return", operator="gte", threshold=0.0),)
+            )
         )
         assert left != right
 
@@ -193,9 +199,7 @@ class TestDistributionSpecHash:
         bumped = DistributionSpec(version="distribution-spec-v2")
         assert distribution_spec_hash(base) != distribution_spec_hash(bumped)
 
-    def test_hash_folds_metric_registry_version(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_hash_folds_metric_registry_version(self, monkeypatch: pytest.MonkeyPatch) -> None:
         base = distribution_spec_hash()
         monkeypatch.setattr(
             "kronos_ai.forecast.distribution.FORECAST_METRIC_REGISTRY_VERSION",

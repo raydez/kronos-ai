@@ -122,9 +122,7 @@ def _link_exclusive(tmp: Path, path: Path) -> bool:
         return False
     except OSError as exc:
         # 不支持硬链接的文件系统上不能静默退化成 rename（会破坏独占语义）。
-        raise ArtifactError(
-            f"cannot create {path} exclusively via hard link: {exc}"
-        ) from exc
+        raise ArtifactError(f"cannot create {path} exclusively via hard link: {exc}") from exc
     return True
 
 

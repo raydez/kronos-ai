@@ -39,7 +39,9 @@ _NANOSECONDS_PER_MILLISECOND = 1_000_000
 
 def _validate_timestamp_ms(timestamp_ms: int) -> int:
     if isinstance(timestamp_ms, bool) or not isinstance(timestamp_ms, int):
-        raise ConfigurationError(f"ULID timestamp must be an int, got {type(timestamp_ms).__name__}")
+        raise ConfigurationError(
+            f"ULID timestamp must be an int, got {type(timestamp_ms).__name__}"
+        )
     if not 0 <= timestamp_ms <= MAX_ULID_TIMESTAMP_MS:
         raise ConfigurationError(
             f"ULID timestamp {timestamp_ms} outside [0, {MAX_ULID_TIMESTAMP_MS}] "
@@ -61,9 +63,7 @@ def encode_ulid(timestamp_ms: int, randomness: bytes) -> str:
     timestamp_ms = _validate_timestamp_ms(timestamp_ms)
     randomness = _validate_randomness(randomness)
     value = (timestamp_ms << ULID_RANDOM_BITS) | int.from_bytes(randomness, "big")
-    return "".join(
-        _ENCODE[(value >> shift) & 0x1F] for shift in range(ULID_LENGTH * 5 - 5, -1, -5)
-    )
+    return "".join(_ENCODE[(value >> shift) & 0x1F] for shift in range(ULID_LENGTH * 5 - 5, -1, -5))
 
 
 def _decode_value(value: str) -> int:
@@ -76,7 +76,9 @@ def _decode_value(value: str) -> int:
         try:
             digit = _DECODE[char]
         except KeyError:
-            raise ConfigurationError(f"ULID contains invalid Crockford base32 char {char!r}") from None
+            raise ConfigurationError(
+                f"ULID contains invalid Crockford base32 char {char!r}"
+            ) from None
         decoded = (decoded << 5) | digit
     if decoded >> (ULID_TIMESTAMP_MS_BITS + ULID_RANDOM_BITS):
         # 26 个 5-bit 字符共 130 bit；首字符若 > '7' 会溢出 128-bit 值域。
@@ -135,9 +137,7 @@ class UlidGenerator:
         random_source: Callable[[int], bytes] | None = None,
     ) -> None:
         self._time_source = time_source if time_source is not None else _now_timestamp_ms
-        self._random_source = (
-            random_source if random_source is not None else secrets.token_bytes
-        )
+        self._random_source = random_source if random_source is not None else secrets.token_bytes
         self._lock = threading.Lock()
         self._last_timestamp_ms: int | None = None
         self._last_random: int = 0

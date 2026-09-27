@@ -181,8 +181,7 @@ class TestForecastDistribution:
     def test_fixture_aggregation_version_is_supported(self) -> None:
         # 夹具必须使用当前受支持的聚合口径版本，否则后续用例会在错误前提下运行
         assert (
-            distribution().aggregation_definition_version
-            in SUPPORTED_FORECAST_AGGREGATION_VERSIONS
+            distribution().aggregation_definition_version in SUPPORTED_FORECAST_AGGREGATION_VERSIONS
         )
 
     def test_duplicate_thresholds_rejected(self) -> None:

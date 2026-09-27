@@ -294,6 +294,4 @@ def test_update_status_rejects_concurrent_change(
 
     monkeypatch.setattr(module, "_row_to_record", stale)
     with pytest.raises(ArtifactError, match="changed concurrently"):
-        registry.update_status(
-            record.run_id, "failed", now=BASE_TIME + timedelta(minutes=2)
-        )
+        registry.update_status(record.run_id, "failed", now=BASE_TIME + timedelta(minutes=2))

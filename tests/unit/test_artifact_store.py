@@ -317,9 +317,7 @@ def test_concurrent_write_of_same_artifact_has_single_winner(tmp_path: Path) -> 
         def worker(payload: bytes) -> None:
             barrier.wait()
             try:
-                record: object = store.write_bytes(
-                    RUN_ID, "data", payload, filename="data.bin"
-                )
+                record: object = store.write_bytes(RUN_ID, "data", payload, filename="data.bin")
             except ArtifactError as exc:  # 期望：败者拿到显式 write-once 错误
                 record = exc
             with lock:

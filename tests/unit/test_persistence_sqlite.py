@@ -154,9 +154,7 @@ def test_context_manager_closes(tmp_path: Path) -> None:
 def test_bind_contract_persists_and_rejects_mismatch(database: SQLiteDatabase) -> None:
     database.bind_contract("widget", "widget-v1")
     database.bind_contract("widget", "widget-v1")  # 幂等
-    row = database.query_one(
-        f"SELECT value FROM {SCHEMA_META_TABLE} WHERE key = ?", ("widget",)
-    )
+    row = database.query_one(f"SELECT value FROM {SCHEMA_META_TABLE} WHERE key = ?", ("widget",))
     assert row is not None and row["value"] == "widget-v1"
     with pytest.raises(ArtifactError, match="binds widget"):
         database.bind_contract("widget", "widget-v2")

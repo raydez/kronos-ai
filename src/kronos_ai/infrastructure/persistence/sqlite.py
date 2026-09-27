@@ -92,9 +92,7 @@ class SQLiteDatabase:
                 return operation()
             except sqlite3.OperationalError as exc:
                 if not _is_locked_error(exc) or attempt == _INIT_RETRY_ATTEMPTS - 1:
-                    raise ArtifactError(
-                        f"SQLite store {self._target} init failed: {exc}"
-                    ) from exc
+                    raise ArtifactError(f"SQLite store {self._target} init failed: {exc}") from exc
                 time.sleep(_INIT_RETRY_INTERVAL_S)
         raise AssertionError("unreachable")  # pragma: no cover
 
@@ -130,6 +128,7 @@ class SQLiteDatabase:
 
     def _initialize_schema(self, schema_version: str, statements: Sequence[str]) -> None:
         """首建 schema。并发冷启动时用 ``INSERT ... ON CONFLICT DO NOTHING`` 消除 TOCTOU。"""
+
         def run_statement(statement: str) -> None:
             self._retry_locked(lambda: self._connection.execute(statement))
 

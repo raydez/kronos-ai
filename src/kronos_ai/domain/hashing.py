@@ -27,8 +27,4 @@ _HEX_DIGITS = frozenset("0123456789abcdef")
 
 def is_sha256_hex(value: object) -> bool:
     """True iff *value* is a 64-char lowercase sha256 hex digest (no whitespace)."""
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and set(value) <= _HEX_DIGITS
-    )
+    return isinstance(value, str) and len(value) == 64 and set(value) <= _HEX_DIGITS

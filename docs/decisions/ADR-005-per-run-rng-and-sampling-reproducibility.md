@@ -37,7 +37,7 @@ generator 版与全局版下对同 seed 抽出一致的结果（已在 RX-KAI-01
 
 ```python
 run_rng = RunRNG(request.sampling, device_class=self._runtime.device_class)
-sample_pre = run_rng.sample_logits(s1_logits)   # s1
+sample_pre = run_rng.sample_logits(s1_logits)  # s1
 sample_post = run_rng.sample_logits(s2_logits)  # s2
 ```
 

@@ -163,7 +163,9 @@ class TestForecastArtifactKey:
 
     def test_golden_digest(self) -> None:
         # golden：字段构成 / hashing payload / canonical json 任一改变都会让本断言变红。
-        assert make_key().digest == "cd3d963e0d1bc99467211ee6c38ad93d1766242cdb48eb4726902f1f335eb5f1"
+        assert (
+            make_key().digest == "cd3d963e0d1bc99467211ee6c38ad93d1766242cdb48eb4726902f1f335eb5f1"
+        )
 
     def test_key_version_participates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """key 版本必须真的进入 payload：只改版本号，digest 就得变（而非同名同义反复）。"""
@@ -282,10 +284,13 @@ class TestBuildForecastArtifactKey:
         )
         assert key.distribution_spec_hash == SPEC_HASH
         assert key.origin_close == history.bars[-1].close  # type: ignore[attr-defined]
-        assert key.digest == make_key(
-            input_data_hash=history.data_hash,  # type: ignore[attr-defined]
-            origin_close=history.bars[-1].close,  # type: ignore[attr-defined]
-        ).digest
+        assert (
+            key.digest
+            == make_key(
+                input_data_hash=history.data_hash,  # type: ignore[attr-defined]
+                origin_close=history.bars[-1].close,  # type: ignore[attr-defined]
+            ).digest
+        )
 
     def test_different_calendar_changes_digest(
         self, make_history: object, session_calendar: object
@@ -293,7 +298,10 @@ class TestBuildForecastArtifactKey:
         """日历是身份维：未来 session 时间轴不同 → 不同 key（即使输入 bar 不变）。"""
         history = make_history(symbol="600000")  # type: ignore[operator]
         request = ForecastRequest(
-            symbol="600000", market_date=MD, knowledge_cutoff=CUTOFF, horizon=2,
+            symbol="600000",
+            market_date=MD,
+            knowledge_cutoff=CUTOFF,
+            horizon=2,
             sampling=SamplingConfig(seed=7, sample_count=2),
         )
         shifted = StaticTradingCalendar(
@@ -322,13 +330,14 @@ class TestBuildForecastArtifactKey:
         """分布 spec 是身份维：阈值/分位不同 → 不同 key（即使样本完全相同）。"""
         history = make_history(symbol="600000")  # type: ignore[operator]
         request = ForecastRequest(
-            symbol="600000", market_date=MD, knowledge_cutoff=CUTOFF, horizon=2,
+            symbol="600000",
+            market_date=MD,
+            knowledge_cutoff=CUTOFF,
+            horizon=2,
             sampling=SamplingConfig(seed=7, sample_count=2),
         )
         spec = DistributionSpec(
-            thresholds=(
-                ThresholdSpec(metric="horizon_return", operator="gt", threshold=0.03),
-            ),
+            thresholds=(ThresholdSpec(metric="horizon_return", operator="gt", threshold=0.03),),
             quantiles=DEFAULT_DISTRIBUTION_SPEC.quantiles,
         )
         base = build_forecast_artifact_key(
@@ -353,7 +362,10 @@ class TestBuildForecastArtifactKey:
     ) -> None:
         identity = {k: v for k, v in MODEL_IDENTITY.items() if k != "config_hash"}
         request = ForecastRequest(
-            symbol="600000", market_date=MD, knowledge_cutoff=CUTOFF, horizon=2,
+            symbol="600000",
+            market_date=MD,
+            knowledge_cutoff=CUTOFF,
+            horizon=2,
             sampling=SamplingConfig(seed=7, sample_count=2),
         )
         with pytest.raises(ConfigurationError, match="config_hash"):
@@ -368,7 +380,10 @@ class TestBuildForecastArtifactKey:
         self, make_history: object, session_calendar: object
     ) -> None:
         request = ForecastRequest(
-            symbol="000001", market_date=MD, knowledge_cutoff=CUTOFF, horizon=2,
+            symbol="000001",
+            market_date=MD,
+            knowledge_cutoff=CUTOFF,
+            horizon=2,
             sampling=SamplingConfig(seed=7, sample_count=2),
         )
         with pytest.raises(ConfigurationError, match="symbol"):
@@ -419,7 +434,10 @@ class TestBuildForecastArtifactKey:
         self, make_history: object, session_calendar: object
     ) -> None:
         request = ForecastRequest(
-            symbol="600000", market_date=MD, knowledge_cutoff=CUTOFF, horizon=2,
+            symbol="600000",
+            market_date=MD,
+            knowledge_cutoff=CUTOFF,
+            horizon=2,
             sampling=SamplingConfig(seed=7, sample_count=2),
         )
         identity: dict[str, object] = {**MODEL_IDENTITY, "model_id": None}
@@ -431,12 +449,13 @@ class TestBuildForecastArtifactKey:
                 calendar=session_calendar,  # type: ignore[arg-type]
             )
 
-    def test_calendar_too_short_explicit_failure(
-        self, make_history: object
-    ) -> None:
+    def test_calendar_too_short_explicit_failure(self, make_history: object) -> None:
         """日历覆盖不足时必须显式失败，而不是静默给出短时间轴。"""
         request = ForecastRequest(
-            symbol="600000", market_date=MD, knowledge_cutoff=CUTOFF, horizon=2,
+            symbol="600000",
+            market_date=MD,
+            knowledge_cutoff=CUTOFF,
+            horizon=2,
             sampling=SamplingConfig(seed=7, sample_count=2),
         )
         short = StaticTradingCalendar(
@@ -729,9 +748,7 @@ class TestCachedForecast:
         with pytest.raises(ArtifactError, match="artifact_id"):
             cached_forecast(cache, key, lambda: make_result(artifact_id="0" * 64))
 
-    def test_compute_with_wrong_distribution_spec_is_explicit_failure(
-        self, tmp_path: Path
-    ) -> None:
+    def test_compute_with_wrong_distribution_spec_is_explicit_failure(self, tmp_path: Path) -> None:
         cache = FileSystemForecastCache(tmp_path)
         key = make_key()
         with pytest.raises(ArtifactError, match="distribution_spec_hash"):

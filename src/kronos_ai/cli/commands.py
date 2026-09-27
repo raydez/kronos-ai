@@ -85,9 +85,7 @@ def _open_persistence(
         if getattr(args, "artifacts_dir", None)
         else default_artifacts_dir()
     )
-    db_path = (
-        Path(args.index_db) if getattr(args, "index_db", None) else index_db_path_for(root)
-    )
+    db_path = Path(args.index_db) if getattr(args, "index_db", None) else index_db_path_for(root)
     if not create and not db_path.exists():
         raise ArtifactError(
             f"run registry not found at {db_path}; run a forecast or benchmark first"

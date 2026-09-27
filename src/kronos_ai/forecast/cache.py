@@ -66,11 +66,7 @@ _HEX_DIGITS = set("0123456789abcdef")
 
 
 def _is_sha256(value: object) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == _HEX256_LENGTH
-        and set(value) <= _HEX_DIGITS
-    )
+    return isinstance(value, str) and len(value) == _HEX256_LENGTH and set(value) <= _HEX_DIGITS
 
 
 def _require_nonempty(value: str, field: str) -> str:
@@ -270,8 +266,7 @@ def build_forecast_artifact_key(
         )
 
     identity = {
-        key: _require_identity_str(model_identity[key], key)
-        for key in REQUIRED_MODEL_IDENTITY_KEYS
+        key: _require_identity_str(model_identity[key], key) for key in REQUIRED_MODEL_IDENTITY_KEYS
     }
 
     sampling = request.sampling
@@ -441,7 +436,10 @@ class FileSystemForecastCache:
         ):
             actual = getattr(result.model, model_field)
             expected = getattr(key, key_field)
-            check(actual == expected, f"model.{model_field} {actual!r} != key {key_field} {expected!r}")
+            check(
+                actual == expected,
+                f"model.{model_field} {actual!r} != key {key_field} {expected!r}",
+            )
         for sample in result.samples:
             timeline = tuple(point.timestamp.date() for point in sample.points)
             check(

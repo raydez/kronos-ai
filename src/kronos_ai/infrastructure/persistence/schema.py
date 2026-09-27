@@ -57,9 +57,7 @@ CREATE TABLE IF NOT EXISTS artifacts (
     PRIMARY KEY (run_id, name)
 )
 """
-ARTIFACTS_RUN_INDEX_DDL = (
-    "CREATE INDEX IF NOT EXISTS artifacts_run_idx ON artifacts(run_id)"
-)
+ARTIFACTS_RUN_INDEX_DDL = "CREATE INDEX IF NOT EXISTS artifacts_run_idx ON artifacts(run_id)"
 
 # §30：raw provider response 是 append-only 快照，按 dataset_version 归档、永不覆盖。
 SNAPSHOTS_TABLE_DDL = """
