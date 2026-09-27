@@ -7,7 +7,10 @@
 - :mod:`kronos_ai.evaluation.walk_forward`：分段与 embargo 空置（§27、§29），已落地（RX-KAI-017）
 - :mod:`kronos_ai.evaluation.dataset`：LabelPolicy / walk-forward dataset / label 构造
   （§27、§28，已落地 RX-KAI-017）
-- ``forecast_metrics.py`` / ``compute_metrics.py``：指标与聚合（§13、§49，RX-KAI-019）
+- :mod:`kronos_ai.evaluation.compute_metrics`：compute cost probe 与 compute budget
+  report（§16、§49，已落地 RX-KAI-018）
+- ``forecast_metrics.py`` / ``decision_metrics.py`` / ``calibration_metrics.py`` /
+  ``trading_metrics.py``：指标（§13、§49、§50，后续任务）
 - ``report.py``：benchmark 报告（§48、§49）
 
 依赖方向是单向的：``evaluation`` → ``forecast`` / ``data`` / ``domain``。因此 baseline
