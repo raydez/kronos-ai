@@ -674,19 +674,16 @@ Universe Builder 与 Dataset Builder 必须保留真实历史状态，不因今�
 
 ```python
 class TradingCalendar(Protocol):
-
     def next_sessions(
         self,
         market_date: date,
         count: int,
-    ) -> list[date]:
-        ...
+    ) -> list[date]: ...
 
     def is_session(
         self,
         day: date,
-    ) -> bool:
-        ...
+    ) -> bool: ...
 ```
 
 支持 SSE / SZSE / BSE。
@@ -939,13 +936,11 @@ raw decoded samples
 
 ```python
 class KronosSampler:
-
     def generate_samples(
         self,
         history: MarketHistory,
         request: ForecastRequest,
-    ) -> list[ForecastSample]:
-        ...
+    ) -> list[ForecastSample]: ...
 ```
 
 禁止：
@@ -1338,15 +1333,13 @@ Core 默认同步：
 
 ```python
 class ForecastBackend(Protocol):
-
     name: str
 
     def forecast(
         self,
         history: MarketHistory,
         request: ForecastRequest,
-    ) -> ForecastResult:
-        ...
+    ) -> ForecastResult: ...
 ```
 
 CLI：
@@ -1377,7 +1370,6 @@ sync core
 
 ```python
 class RuntimeRegistry:
-
     def get_forecast_backend(self, name: str) -> ForecastBackend: ...
 
     def get_decision_backend(self, name: str) -> DecisionBackend: ...
@@ -1417,15 +1409,13 @@ PredictionService 式职责模糊的大服务
 
 ```python
 class MarketDataProvider(Protocol):
-
     def get_history(
         self,
         symbol: str,
         market_date: date,
         knowledge_cutoff: datetime,
         lookback_bars: int,
-    ) -> MarketHistory:
-        ...
+    ) -> MarketHistory: ...
 ```
 
 如果底层 BaoStock 是阻塞 IO：
@@ -1626,13 +1616,11 @@ isolated runtime
 
 ```python
 class ExternalDecisionAdapter(Protocol):
-
     def decide(
         self,
         state: MarketState,
         schema: DecisionSchema,
-    ) -> DecisionResult:
-        ...
+    ) -> DecisionResult: ...
 ```
 
 ---
@@ -1741,11 +1729,7 @@ class DecisionAnswer(BaseModel):
 
 
 class DecisionScores(BaseModel):
-    score_space: Literal[
-        "logits",
-        "probabilities",
-        "calibrated_probabilities"
-    ]
+    score_space: Literal["logits", "probabilities", "calibrated_probabilities"]
 
     values: dict[str, float]
 ```
@@ -1854,7 +1838,6 @@ ABSTAIN
 
 ```python
 class Calibrator(Protocol):
-
     name: str
     required_score_space: str
 
@@ -1862,14 +1845,12 @@ class Calibrator(Protocol):
         self,
         scores,
         labels,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     def transform(
         self,
         scores,
-    ):
-        ...
+    ): ...
 ```
 
 能力示例：

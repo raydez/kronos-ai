@@ -1,6 +1,6 @@
 {
   "spike": "baostock-capability",
-  "generated_at": "2026-09-27T09:18:42+0800",
+  "generated_at": "2026-09-27T09:41:51+0800",
   "timeout_s": 30.0,
   "checks": {
     "client_info": {
@@ -23,12 +23,12 @@
       "tcp_probe": {
         "host": "public-api.baostock.com",
         "connect_ok": true,
-        "elapsed_s": 0.007
+        "elapsed_s": 0.008
       },
       "legacy_endpoint_probe": {
         "host": "www.baostock.com",
         "connect_ok": true,
-        "elapsed_s": 0.007
+        "elapsed_s": 0.006
       },
       "elapsed_s": 0.01
     },
@@ -38,7 +38,7 @@
       "confirm_criterion": "login returns a ResultData with error_code == '0'",
       "error_code": "0",
       "error_msg": "success",
-      "elapsed_s": 0.09
+      "elapsed_s": 0.18
     },
     "trade_dates": {
       "status": "ok",
@@ -175,7 +175,7 @@
           "1"
         ]
       ],
-      "elapsed_s": 6.66
+      "elapsed_s": 4.73
     },
     "adjust_factor": {
       "status": "ok",
@@ -395,7 +395,7 @@
           "13.367013"
         ]
       ],
-      "elapsed_s": 0.48
+      "elapsed_s": 0.26
     },
     "factor_normalization": {
       "status": "ok",
@@ -447,7 +447,7 @@
       },
       "all_latest_fore_unity": true,
       "interpretation": "latest foreAdjustFactor == 1.0 across symbols → the factor table is normalized to the most recent corporate action at query time; adjusted series derived from it are query-time dependent and not PIT-reproducible without snapshots",
-      "elapsed_s": 1.25
+      "elapsed_s": 0.12
     },
     "factor_price_mapping": {
       "status": "ok",
@@ -533,7 +533,7 @@
         "hfq_over_raw": 11.434431,
         "qfq_over_raw": 0.8554209999999999
       },
-      "elapsed_s": 8.27
+      "elapsed_s": 2.5
     },
     "index_constituents": {
       "status": "ok",
@@ -554,6 +554,7 @@
         "by_probe_date": {
           "2005-06-30": {
             "error_code": "0",
+            "date_echo": "2005-06-30",
             "rows": 0,
             "update_dates": [],
             "diff_vs_latest": 300,
@@ -561,6 +562,7 @@
           },
           "2005-12-30": {
             "error_code": "0",
+            "date_echo": "2005-12-30",
             "rows": 0,
             "update_dates": [],
             "diff_vs_latest": 300,
@@ -568,6 +570,7 @@
           },
           "2006-01-04": {
             "error_code": "0",
+            "date_echo": "2006-01-04",
             "rows": 300,
             "update_dates": [
               "2006-01-02"
@@ -577,6 +580,7 @@
           },
           "2006-06-20": {
             "error_code": "0",
+            "date_echo": "2006-06-20",
             "rows": 300,
             "update_dates": [
               "2006-06-19"
@@ -586,6 +590,7 @@
           },
           "2006-06-30": {
             "error_code": "0",
+            "date_echo": "2006-06-30",
             "rows": 300,
             "update_dates": [
               "2006-06-26"
@@ -595,6 +600,7 @@
           },
           "2007-01-04": {
             "error_code": "0",
+            "date_echo": "2007-01-04",
             "rows": 300,
             "update_dates": [
               "2007-01-01"
@@ -604,6 +610,7 @@
           },
           "2007-01-31": {
             "error_code": "0",
+            "date_echo": "2007-01-31",
             "rows": 300,
             "update_dates": [
               "2007-01-29"
@@ -613,6 +620,7 @@
           },
           "2008-06-30": {
             "error_code": "0",
+            "date_echo": "2008-06-30",
             "rows": 300,
             "update_dates": [
               "2008-06-30"
@@ -622,6 +630,7 @@
           },
           "2020-06-30": {
             "error_code": "0",
+            "date_echo": "2020-06-30",
             "rows": 300,
             "update_dates": [
               "2020-06-29"
@@ -633,6 +642,7 @@
         "future_date_probe": {
           "date": "2027-06-30",
           "error_code": "0",
+          "date_echo": "2027-06-30",
           "rows": 300,
           "update_dates": [
             "2026-09-21"
@@ -667,6 +677,7 @@
         "by_probe_date": {
           "2005-06-30": {
             "error_code": "0",
+            "date_echo": "2005-06-30",
             "rows": 0,
             "update_dates": [],
             "diff_vs_latest": 500,
@@ -674,6 +685,7 @@
           },
           "2005-12-30": {
             "error_code": "0",
+            "date_echo": "2005-12-30",
             "rows": 0,
             "update_dates": [],
             "diff_vs_latest": 500,
@@ -681,6 +693,7 @@
           },
           "2006-01-04": {
             "error_code": "0",
+            "date_echo": "2006-01-04",
             "rows": 0,
             "update_dates": [],
             "diff_vs_latest": 500,
@@ -688,6 +701,7 @@
           },
           "2006-06-20": {
             "error_code": "0",
+            "date_echo": "2006-06-20",
             "rows": 0,
             "update_dates": [],
             "diff_vs_latest": 500,
@@ -695,6 +709,7 @@
           },
           "2006-06-30": {
             "error_code": "0",
+            "date_echo": "2006-06-30",
             "rows": 0,
             "update_dates": [],
             "diff_vs_latest": 500,
@@ -702,6 +717,7 @@
           },
           "2007-01-04": {
             "error_code": "0",
+            "date_echo": "2007-01-04",
             "rows": 0,
             "update_dates": [],
             "diff_vs_latest": 500,
@@ -709,6 +725,7 @@
           },
           "2007-01-31": {
             "error_code": "0",
+            "date_echo": "2007-01-31",
             "rows": 500,
             "update_dates": [
               "2007-01-29"
@@ -718,6 +735,7 @@
           },
           "2008-06-30": {
             "error_code": "0",
+            "date_echo": "2008-06-30",
             "rows": 500,
             "update_dates": [
               "2008-06-30"
@@ -727,6 +745,7 @@
           },
           "2020-06-30": {
             "error_code": "0",
+            "date_echo": "2020-06-30",
             "rows": 500,
             "update_dates": [
               "2020-06-29"
@@ -738,6 +757,7 @@
         "future_date_probe": {
           "date": "2027-06-30",
           "error_code": "0",
+          "date_echo": "2027-06-30",
           "rows": 500,
           "update_dates": [
             "2026-09-21"
@@ -757,7 +777,7 @@
           ]
         ]
       },
-      "elapsed_s": 10.19
+      "elapsed_s": 4.09
     },
     "suspension": {
       "status": "ok",
@@ -970,7 +990,7 @@
       "total_volume_zero": 201,
       "total_amount_zero": 202,
       "total_empty_volume": 1,
-      "elapsed_s": 3.6
+      "elapsed_s": 6.19
     },
     "symbol_lifecycle": {
       "status": "ok",
@@ -1186,7 +1206,7 @@
           }
         ]
       },
-      "elapsed_s": 1.17
+      "elapsed_s": 0.71
     },
     "publication_lag": {
       "status": "ok",
@@ -1248,7 +1268,7 @@
       },
       "sessions_without_bars": [],
       "last_bar_day_consistent": true,
-      "elapsed_s": 0.61
+      "elapsed_s": 0.05
     },
     "error_semantics": {
       "status": "ok",
@@ -1348,7 +1368,7 @@
         }
       },
       "mismatches": [],
-      "elapsed_s": 0.14
+      "elapsed_s": 0.29
     }
   },
   "errors": [],

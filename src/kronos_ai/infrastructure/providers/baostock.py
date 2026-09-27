@@ -35,6 +35,10 @@ v1 的 5 处 `_generate_fallback_data` 静默 fallback 全部不迁移：
    「对端静默不收不发」的阻塞等待；
 2. login 与每次取数都在 daemon 线程内执行并施加硬超时（`_run_bounded`）；超时即
    关闭会话 socket，让空转循环以 `OSError` 收场、作废登录态，并抛 ProviderError。
+
+同一模块还提供 `BaoStockUniverseLoader`（RX-KAI-007）：指数成分股查询与日线共享
+上述会话、锁与超时策略；其 PIT 规则（空名单、可用起点、未来日期静默 clamp）见该类
+docstring 与 ADR-008。
 """
 
 from __future__ import annotations
@@ -44,22 +48,30 @@ import importlib
 import socket
 import threading
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from types import ModuleType
-from typing import Any, cast
+from typing import Any, Self, cast
 
 from pydantic import ValidationError
 
 from kronos_ai.data.base import MarketDataProvider  # noqa: F401  (re-export contract)
+from kronos_ai.data.universe import (
+    EXPECTED_MEMBER_COUNT,
+    UNIVERSE_ID_HS300,
+    UNIVERSE_ID_ZZ500,
+    UniverseSnapshot,
+)
 from kronos_ai.domain.market import MarketBar, MarketHistory
 from kronos_ai.domain.symbols import normalize_symbol
-from kronos_ai.domain.time import CN_TZ
+from kronos_ai.domain.time import CN_TZ, ensure_shanghai_aware
 from kronos_ai.errors import (
     ConfigurationError,
     DataQualityError,
     InsufficientHistoryError,
     KronosAIError,
     ProviderError,
+    UniverseError,
 )
 
 BAO_STOCK_PUBLISHED_AT = time(18, 0)
@@ -253,24 +265,89 @@ def _page_state_is_truncated(result: Any, per_page: int) -> bool:
     return len(data) == per_page and cursor >= len(data)
 
 
-class BaoStockProvider:
+def _drain_pages(
+    result: Any, subject: str, fields: list[str], per_page: int
+) -> list[dict[str, str]]:
+    """耗尽 ``ResultData`` 游标并检测两类翻页失败（读 0.9.4 源码核实）。
+
+    - 服务端错误码：``next()`` 先置 ``error_code`` 再返回 False，循环后复查可见；
+    - ``send_msg`` 静默失败（socket 超时/对端断开/页号异常）：``next()`` 直接
+      返回 False 且**不置 error_code**。其唯一痕迹是游标停在整页
+      （``cur_row_num == len(data) == 单页行数``）——正常结束只有三种形态：
+      空结果、非整页收尾、或整页后再取到空页（``data`` 清空）。因此
+      「非空 + 恰好整页 + 游标到头」必然是截断，显式失败而非交给上层当短结果。
+    """
+    rows: list[dict[str, str]] = []
+    while True:
+        has_next = result.next()
+        if not has_next:
+            if getattr(result, "error_code", "0") != "0":
+                raise ProviderError(
+                    f"baostock page request failed for {subject}: "
+                    f"{getattr(result, 'error_msg', 'unknown')}"
+                )
+            if _page_state_is_truncated(result, per_page):
+                raise ProviderError(
+                    f"baostock paging truncated for {subject} at {len(rows)} rows: "
+                    "a full page was followed by an empty response with no error code"
+                )
+            return rows
+        values = list(result.get_row_data())
+        if len(values) != len(fields):
+            raise DataQualityError(
+                f"baostock returned {len(values)} values for {len(fields)} fields for {subject}"
+            )
+        rows.append(dict(zip(fields, values, strict=True)))
+
+
+def _run_query(
+    query: Callable[[], Any], *, label: str, subject: str, per_page: int
+) -> list[dict[str, str]]:
+    """执行一次 ``query_*`` 调用并收集全部行；失败一律显式（ADR-010）。
+
+    ``label`` 是查询族名（``query`` / ``query_hs300_stocks`` …），只进错误消息。
+    """
+    try:
+        result = query()
+    except KronosAIError:
+        raise
+    except Exception as exc:  # 客户端本地异常（IndexError/JSONDecodeError 等）
+        raise ProviderError(f"baostock {label} raised for {subject}: {exc!r}") from exc
+    if result is None:  # 入参被客户端拒绝时直接返回 None，不是错误对象
+        raise ProviderError(f"baostock {label} returned None for {subject}")
+    if getattr(result, "error_code", "1") != "0":
+        raise ProviderError(
+            f"baostock {label} failed for {subject}: {getattr(result, 'error_msg', 'unknown')}"
+        )
+    try:
+        fields = list(getattr(result, "fields", ()))
+        if not fields:
+            raise ProviderError(f"baostock returned no field metadata for {subject}")
+        return _drain_pages(result, subject, fields, per_page)
+    except KronosAIError:
+        raise
+    except Exception as exc:
+        raise ProviderError(f"baostock paging failed for {subject}: {exc!r}") from exc
+
+
+class _BaostockSessionClient:
+    """baostock 会话持有者的公共骨架：登录、引用计数、关闭语义与硬超时配置。
+
+    ``BaoStockProvider`` 与 ``BaoStockUniverseLoader`` 只叠加各自的查询逻辑；会话
+    相关的修复（硬超时断 socket、断线后重登录）只应在这里发生一次，避免两份副本
+    各自漂移。
+    """
+
     def __init__(
         self,
         *,
-        adjust_flag: str = "3",
-        dataset_version: str = "baostock-v1",
-        baostock_module: ModuleType | None = None,
-        hard_timeout_seconds: float = BAOSTOCK_HARD_TIMEOUT_SECONDS,
+        baostock_module: ModuleType | None,
+        hard_timeout_seconds: float,
     ) -> None:
-        if adjust_flag not in ADJUST_FLAG_TO_MODE:
-            raise ConfigurationError(f"unknown adjust_flag: {adjust_flag!r}")
         if hard_timeout_seconds <= 0:
             raise ConfigurationError(
                 f"hard_timeout_seconds must be > 0, got {hard_timeout_seconds!r}"
             )
-        self._adjust_flag = adjust_flag
-        self._adjustment_mode = ADJUST_FLAG_TO_MODE[adjust_flag]
-        self._dataset_version = dataset_version
         self._hard_timeout = hard_timeout_seconds
         self._bs = (
             baostock_module if baostock_module is not None else importlib.import_module("baostock")
@@ -280,7 +357,7 @@ class BaoStockProvider:
         self._session_acquired = False
         self._closed = False
 
-    def __enter__(self) -> BaoStockProvider:
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc_info: object) -> None:
@@ -295,12 +372,31 @@ class BaoStockProvider:
 
     def _ensure_session(self) -> None:
         if self._closed:
-            raise ConfigurationError("BaoStockProvider is closed; create a new instance to query")
+            raise ConfigurationError(
+                f"{type(self).__name__} is closed; create a new instance to query"
+            )
         if not self._session_acquired:
             self._session.acquire(self._hard_timeout)
             self._session_acquired = True
         else:
             self._session.ensure(self._hard_timeout)
+
+
+class BaoStockProvider(_BaostockSessionClient):
+    def __init__(
+        self,
+        *,
+        adjust_flag: str = "3",
+        dataset_version: str = "baostock-v1",
+        baostock_module: ModuleType | None = None,
+        hard_timeout_seconds: float = BAOSTOCK_HARD_TIMEOUT_SECONDS,
+    ) -> None:
+        if adjust_flag not in ADJUST_FLAG_TO_MODE:
+            raise ConfigurationError(f"unknown adjust_flag: {adjust_flag!r}")
+        self._adjust_flag = adjust_flag
+        self._adjustment_mode = ADJUST_FLAG_TO_MODE[adjust_flag]
+        self._dataset_version = dataset_version
+        super().__init__(baostock_module=baostock_module, hard_timeout_seconds=hard_timeout_seconds)
 
     def get_history(
         self,
@@ -364,73 +460,23 @@ class BaoStockProvider:
         self._ensure_session()
         with self._session.lock:
             return _run_bounded(
-                lambda: self._query_and_drain(code, start, end),
+                lambda: _run_query(
+                    lambda: self._bs.query_history_k_data_plus(
+                        code,
+                        K_LINE_FIELDS,
+                        start_date=start.isoformat(),
+                        end_date=end.isoformat(),
+                        frequency="d",
+                        adjustflag=self._adjust_flag,
+                    ),
+                    label="query",
+                    subject=code,
+                    per_page=self._per_page_count,
+                ),
                 label=f"query {code}",
                 timeout=self._hard_timeout,
                 on_timeout=self._session.break_socket,
             )
-
-    def _query_and_drain(self, code: str, start: date, end: date) -> list[dict[str, str]]:
-        try:
-            result = self._bs.query_history_k_data_plus(
-                code,
-                K_LINE_FIELDS,
-                start_date=start.isoformat(),
-                end_date=end.isoformat(),
-                frequency="d",
-                adjustflag=self._adjust_flag,
-            )
-        except KronosAIError:
-            raise
-        except Exception as exc:  # 客户端本地异常（IndexError/JSONDecodeError 等）
-            raise ProviderError(f"baostock query raised for {code}: {exc!r}") from exc
-        if result is None:  # 入参被客户端拒绝时直接返回 None，不是错误对象
-            raise ProviderError(f"baostock query returned None for {code}")
-        if getattr(result, "error_code", "1") != "0":
-            raise ProviderError(
-                f"baostock query failed for {code}: {getattr(result, 'error_msg', 'unknown')}"
-            )
-        try:
-            fields = list(getattr(result, "fields", ()))
-            if not fields:
-                raise ProviderError(f"baostock returned no field metadata for {code}")
-            return self._drain_pages(result, code, fields)
-        except KronosAIError:
-            raise
-        except Exception as exc:
-            raise ProviderError(f"baostock paging failed for {code}: {exc!r}") from exc
-
-    def _drain_pages(self, result: Any, code: str, fields: list[str]) -> list[dict[str, str]]:
-        """耗尽 ``ResultData`` 游标并检测两类翻页失败（读 0.9.4 源码核实）。
-
-        - 服务端错误码：``next()`` 先置 ``error_code`` 再返回 False，循环后复查可见；
-        - ``send_msg`` 静默失败（socket 超时/对端断开/页号异常）：``next()`` 直接
-          返回 False 且**不置 error_code**。其唯一痕迹是游标停在整页
-          （``cur_row_num == len(data) == 单页行数``）——正常结束只有三种形态：
-          空结果、非整页收尾、或整页后再取到空页（``data`` 清空）。因此
-          「非空 + 恰好整页 + 游标到头」必然是截断，显式失败而非交给上层当短历史。
-        """
-        rows: list[dict[str, str]] = []
-        while True:
-            has_next = result.next()
-            if not has_next:
-                if getattr(result, "error_code", "0") != "0":
-                    raise ProviderError(
-                        f"baostock page request failed for {code}: "
-                        f"{getattr(result, 'error_msg', 'unknown')}"
-                    )
-                if _page_state_is_truncated(result, self._per_page_count):
-                    raise ProviderError(
-                        f"baostock paging truncated for {code} at {len(rows)} rows: "
-                        "a full page was followed by an empty response with no error code"
-                    )
-                return rows
-            values = list(result.get_row_data())
-            if len(values) != len(fields):
-                raise DataQualityError(
-                    f"baostock returned {len(values)} values for {len(fields)} fields for {code}"
-                )
-            rows.append(dict(zip(fields, values, strict=True)))
 
     def _parse_bars(
         self, rows: list[dict[str, str]], symbol: str, knowledge_cutoff: datetime
@@ -487,3 +533,182 @@ class BaoStockProvider:
         except (TypeError, ValueError):
             return None
         return parsed if parsed > 0 else None
+
+
+@dataclass(frozen=True)
+class _IndexSpec:
+    """单个指数的成分股查询配置与 spike 核实过的可用性边界。
+
+    ``last_empty_probe`` / ``first_nonempty_probe`` 是 RX-KAI-006 spike 的**探测边界**
+    （见 ``checks.index_constituents``），不是可用起点本身：真实起点在两者之间，
+    未逐日探测，因此只用来构造错误消息，不参与任何判定。
+    """
+
+    universe_id: str
+    query_method: str
+    last_empty_probe: date
+    first_nonempty_probe: date
+
+
+# HS300 与 ZZ500 的可用深度不同（spike §3），不得共用起点，也不得相互默认。
+_INDEX_SPECS: dict[str, _IndexSpec] = {
+    UNIVERSE_ID_HS300: _IndexSpec(
+        universe_id=UNIVERSE_ID_HS300,
+        query_method="query_hs300_stocks",
+        last_empty_probe=date(2005, 12, 30),
+        first_nonempty_probe=date(2006, 1, 4),
+    ),
+    UNIVERSE_ID_ZZ500: _IndexSpec(
+        universe_id=UNIVERSE_ID_ZZ500,
+        query_method="query_zz500_stocks",
+        last_empty_probe=date(2007, 1, 4),
+        first_nonempty_probe=date(2007, 1, 31),
+    ),
+}
+
+
+def _require_plain_date(value: object, field: str) -> None:
+    """必须是 date 而不是 datetime 或别的类型。
+
+    datetime 是 date 的子类，误传会在日期比较处按时间部分比较；非日期类型则会在
+    比较处抛裸 TypeError——两者都必须在边界上变成 ConfigurationError。
+    """
+    if isinstance(value, datetime) or not isinstance(value, date):
+        raise ConfigurationError(f"{field} must be a date, got {value!r}")
+
+
+def _parse_constituents(
+    rows: list[dict[str, str]], spec: _IndexSpec, effective_date: date
+) -> tuple[tuple[str, ...], date]:
+    """成分股行 → (规范代码元组, 名单修订日)；任何不符合契约的响应显式失败。"""
+    missing = [name for name in ("updateDate", "code") if name not in rows[0]]
+    if missing:
+        raise DataQualityError(
+            f"baostock {spec.query_method} response lacks column(s) {missing}; "
+            "the list revision date cannot be established"
+        )
+    update_dates = sorted({row["updateDate"] for row in rows})
+    if len(update_dates) != 1:
+        # 名单是原子修订：多个修订日意味着拼接了不同版本的名单，无法证明 PIT 语义
+        raise DataQualityError(
+            f"baostock {spec.universe_id} constituents at {effective_date} carry "
+            f"{len(update_dates)} distinct updateDate values {update_dates[:3]}; "
+            "a single uniformly-revised list was expected"
+        )
+    try:
+        update_date = date.fromisoformat(update_dates[0])
+    except ValueError as exc:
+        raise DataQualityError(
+            f"baostock returned unparsable updateDate {update_dates[0]!r} for {spec.universe_id}"
+        ) from exc
+
+    symbols: list[str] = []
+    for idx, row in enumerate(rows):
+        raw_code = row["code"]
+        try:
+            symbols.append(normalize_symbol(raw_code))
+        except ValueError as exc:
+            raise DataQualityError(
+                f"baostock returned malformed code #{idx} {raw_code!r} for {spec.universe_id}"
+            ) from exc
+    if len(set(symbols)) != len(symbols):
+        raise DataQualityError(
+            f"baostock {spec.universe_id} constituents at {effective_date} contain duplicate codes"
+        )
+    expected = EXPECTED_MEMBER_COUNT[spec.universe_id]
+    if len(symbols) != expected:
+        raise DataQualityError(
+            f"baostock returned {len(symbols)} {spec.universe_id} constituents at "
+            f"{effective_date}; exactly {expected} were expected"
+        )
+    return tuple(sorted(symbols)), update_date
+
+
+class BaoStockUniverseLoader(_BaostockSessionClient):
+    """历史成分股加载器（RX-KAI-007，ADR-008）；与价格 Provider 共用会话与超时策略。
+
+    PIT 规则（spike §3 的泄漏结论，ADR-008 固化）：
+
+    - ``date=`` 在早于可用起点时返回空名单 → ``UniverseError``，绝不用最新名单替代；
+    - 未来日期会被服务端静默 clamp 到最新名单且 ``error_code=0``（``data.date`` 原样
+      回显，无法据此识别），因此由本层拒绝 ``effective_date`` 晚于 cutoff 当日的调用；
+    - ``update_date`` 晚于 ``effective_date`` 的快照不是「当时有效」的名单，显式失败。
+    """
+
+    def __init__(
+        self,
+        *,
+        dataset_version: str = "baostock-v1",
+        baostock_module: ModuleType | None = None,
+        hard_timeout_seconds: float = BAOSTOCK_HARD_TIMEOUT_SECONDS,
+    ) -> None:
+        self._dataset_version = dataset_version
+        super().__init__(baostock_module=baostock_module, hard_timeout_seconds=hard_timeout_seconds)
+
+    def load(
+        self,
+        universe_id: str,
+        effective_date: date,
+        knowledge_cutoff: datetime,
+    ) -> UniverseSnapshot:
+        spec = _INDEX_SPECS.get(universe_id)
+        if spec is None:
+            known = ", ".join(sorted(_INDEX_SPECS))
+            raise ConfigurationError(f"unknown universe_id {universe_id!r}; known: {known}")
+        _require_plain_date(effective_date, "effective_date")
+        if not isinstance(knowledge_cutoff, datetime):
+            raise ConfigurationError(
+                f"knowledge_cutoff must be a datetime, got {type(knowledge_cutoff).__name__}"
+            )
+        try:
+            # cutoff 的日期部分必须按北京时间解读：非 +08:00 的偏移会让 .date() 漂移到
+            # 另一天，从而放过「未来 universe」（§5 的 ResearchTime 同此约束）
+            ensure_shanghai_aware(knowledge_cutoff, "knowledge_cutoff")
+        except ValueError as exc:
+            raise ConfigurationError(str(exc)) from exc
+        if effective_date > knowledge_cutoff.date():
+            # 服务端对未来日期静默返回最新名单（spike §3），这类调用必须死在调用侧
+            raise ConfigurationError(
+                f"effective_date {effective_date} is after knowledge_cutoff "
+                f"{knowledge_cutoff.isoformat()}; a universe beyond the cutoff cannot be known"
+            )
+
+        rows = self._collect_constituents(spec, effective_date)
+        if not rows:
+            raise UniverseError(
+                f"baostock has no {spec.universe_id} constituents at {effective_date}: the "
+                f"constituent history does not reach back this far (spike bounds: empty at "
+                f"{spec.last_empty_probe}, non-empty at {spec.first_nonempty_probe}; the exact "
+                f"first available date is unknown) — do not substitute the current list"
+            )
+        symbols, update_date = _parse_constituents(rows, spec, effective_date)
+        try:
+            return UniverseSnapshot(
+                universe_id=spec.universe_id,
+                effective_date=effective_date,
+                symbols=symbols,
+                source=f"baostock:{spec.query_method}",
+                version=self._dataset_version,
+                update_date=update_date,
+            )
+        except ValidationError as exc:
+            raise DataQualityError(
+                f"baostock {spec.universe_id} constituents at {effective_date} violated the "
+                f"snapshot contract: {exc}"
+            ) from exc
+
+    def _collect_constituents(self, spec: _IndexSpec, effective_date: date) -> list[dict[str, str]]:
+        self._ensure_session()
+        subject = f"{spec.universe_id}@{effective_date.isoformat()}"
+        with self._session.lock:
+            return _run_bounded(
+                lambda: _run_query(
+                    lambda: getattr(self._bs, spec.query_method)(date=effective_date.isoformat()),
+                    label=spec.query_method,
+                    subject=subject,
+                    per_page=self._per_page_count,
+                ),
+                label=f"universe {subject}",
+                timeout=self._hard_timeout,
+                on_timeout=self._session.break_socket,
+            )

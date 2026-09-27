@@ -19,6 +19,10 @@ class InsufficientHistoryError(KronosAIError):
     """Symbol lacks the minimum history required by policy (§6.4)."""
 
 
+class UniverseError(KronosAIError):
+    """Universe constituents are unavailable for the requested point in time (§6.2)."""
+
+
 class ModelInferenceError(KronosAIError):
     """Forecast backend inference or output parsing failed; no random OHLC."""
 

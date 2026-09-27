@@ -511,10 +511,12 @@ def _probe_constituent_dates(
     query = getattr(bs, query_name)
     out: dict[str, Any] = {}
     for probe in HISTORY_DEPTH_PROBES:
-        error_code, _, _, rows = _rows(query(date=probe))
+        raw = query(date=probe)
+        error_code, _, _, rows = _rows(raw)
         codes = {row[code_index] for row in rows}
         out[probe] = {
             "error_code": error_code,
+            "date_echo": getattr(raw, "date", None),
             "rows": len(rows),
             "update_dates": sorted({row[update_index] for row in rows}),
             "diff_vs_latest": len(codes ^ latest_codes),
@@ -527,11 +529,13 @@ def check_index_constituents(bs: Any) -> dict[str, Any]:
     result: dict[str, Any] = {}
     for label, query_name in (("hs300", "query_hs300_stocks"), ("zz500", "query_zz500_stocks")):
         query = getattr(bs, query_name)
-        latest_code, latest_msg, fields, latest_rows = _rows(query())
+        latest_raw = query()
+        latest_code, latest_msg, fields, latest_rows = _rows(latest_raw)
         code_index = fields.index("code") if "code" in fields else 1
         update_index = fields.index("updateDate") if "updateDate" in fields else 0
         latest_codes = {row[code_index] for row in latest_rows}
-        future_code, _, _, future_rows = _rows(query(date=CONSTITUENT_FUTURE_DATE))
+        future_raw = query(date=CONSTITUENT_FUTURE_DATE)
+        future_code, _, _, future_rows = _rows(future_raw)
         future_codes = {row[code_index] for row in future_rows}
         result[label] = {
             "error_code": latest_code,
@@ -545,6 +549,8 @@ def check_index_constituents(bs: Any) -> dict[str, Any]:
             "future_date_probe": {
                 "date": CONSTITUENT_FUTURE_DATE,
                 "error_code": future_code,
+                # 服务端原样回显所请求的日期（含未来日期），不提示已 clamp 到最新名单
+                "date_echo": getattr(future_raw, "date", None),
                 "rows": len(future_rows),
                 "update_dates": sorted({row[update_index] for row in future_rows}),
                 "same_set_as_latest": future_codes == latest_codes,
