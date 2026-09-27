@@ -22,7 +22,6 @@ from kronos_ai.forecast.backends.kronos.sampler import (
     KronosSampler,
     RawSampleSet,
     assert_finite_samples,
-    build_generator,
     time_stamp_frame,
 )
 from kronos_ai.forecast.backends.kronos.vendor import calc_time_stamps
@@ -140,26 +139,6 @@ class TestTimeStampFrame:
         # 2026-09-25 是周五（weekday=4），15:00
         frame = time_stamp_frame([datetime(2026, 9, 25, 15, 0, tzinfo=CN_TZ)])
         assert frame.tolist() == [[0.0, 15.0, 4.0, 25.0, 9.0]]
-
-
-class TestGenerator:
-    def test_same_seed_same_stream(self) -> None:
-        probs = np.linspace(0.1, 0.4, 4).astype(np.float32)
-
-        def draws(gen: torch.Generator) -> list[int]:
-            return [
-                int(torch.multinomial(torch.from_numpy(probs), 1, generator=gen).item())
-                for _ in range(5)
-            ]
-
-        assert draws(build_generator(11, "cpu")) == draws(build_generator(11, "cpu"))
-        assert draws(build_generator(12, "cpu")) != draws(build_generator(11, "cpu"))
-
-    def test_does_not_touch_global_rng(self) -> None:
-        torch.manual_seed(0)
-        before = torch.random.get_rng_state()
-        build_generator(99, "cpu")
-        assert torch.equal(before, torch.random.get_rng_state())
 
 
 class TestSamplerValidation:

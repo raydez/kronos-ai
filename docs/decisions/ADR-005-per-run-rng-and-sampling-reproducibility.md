@@ -29,14 +29,21 @@ generator 版与全局版下对同 seed 抽出一致的结果（已在 RX-KAI-01
 
 ### 1. 每个 run 一个显式 generator
 
+落点（RX-KAI-011）：`forecast/backends/kronos/rng.py` 的 `RunRNG` 是唯一构造点与唯一
+采样入口。generator 是单下划线约定的私有字段，采样只能走
+`RunRNG.sample_logits(logits, sampling)`：这样「新增采样点漏传 generator」不再可能——
+没有 generator 可供绕开，只能显式走同一条随机流。该约定由仓库级守卫测试加固：
+`tests/unit/test_rng.py` 断言 `torch.multinomial` 只允许出现在 `rng.py`（vendor 白名单除外）。
+
 ```python
-generator = torch.Generator(device=device_class)   # device 不支持时 ConfigurationError
-generator.manual_seed(seed)                        # seed 来自 SamplingConfig，契约限定 [0, 2**63-1]
+run_rng = RunRNG(seed=sampling.seed, device_class=self._runtime.device_class)
+sample_pre = run_rng.sample_logits(s1_logits, sampling)   # s1
+sample_post = run_rng.sample_logits(s2_logits, sampling)  # s2
 ```
 
-`build_generator(seed, device)` 是唯一构造点；generator 沿调用链显式传入
-（`decode_raw_samples` → `_decode_tokens` → `_sample`），不存全局、不用线程局部、
-不依赖调用方先设 seed。
+`RunRNG.__init__` 内部：`torch.Generator(device=device_class)`（device 不支持时
+`ConfigurationError`）+ `generator.manual_seed(seed)`（seed 来自 `SamplingConfig`，契约
+限定 `[0, 2**63-1]`）。generator 不落全局、不用线程局部、不依赖调用方先设 seed。
 
 ### 2. 覆盖全部采样调用点
 
@@ -51,8 +58,8 @@ generator——用全局 RNG 的采样调用属实现缺陷，而非风格问题
   `torch.random.get_rng_state()` 必须逐位相同（`tests/unit/test_sampler.py`、
   `tests/regression/test_sampler_equivalence.py`）。
 - 构造 generator 本身也不触碰全局状态（有测试）。
-- 上游 `sample_from_logits` 保持原样（vendored，ADR-020）；generator 化发生在受控
-  adapter 的 `_sample` 中，`temperature` / `top_k` / `top_p` 的处理顺序与上游逐点一致。
+- 上游 `sample_from_logits` 保持原样（vendored，ADR-020）；generator 化发生在
+  `RunRNG.sample_logits` 中，`temperature` / `top_k` / `top_p` 的处理顺序与上游逐点一致。
 
 ### 4. 可复现性的承诺边界
 

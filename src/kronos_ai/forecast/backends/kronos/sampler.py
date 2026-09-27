@@ -60,8 +60,8 @@ from kronos_ai.errors import (
     InsufficientHistoryError,
     ModelInferenceError,
 )
+from kronos_ai.forecast.backends.kronos.rng import RunRNG
 from kronos_ai.forecast.backends.kronos.runtime import KronosRuntime
-from kronos_ai.forecast.backends.kronos.vendor import top_k_top_p_filtering
 
 FEATURE_NAMES: tuple[str, ...] = ("open", "high", "low", "close", "volume", "amount")
 TIME_FEATURE_NAMES: tuple[str, ...] = ("minute", "hour", "weekday", "day", "month")
@@ -112,16 +112,6 @@ class RawSampleSet:
     @property
     def sample_count(self) -> int:
         return int(self.values.shape[0])
-
-
-def build_generator(seed: int, device: str) -> torch.Generator:
-    """per-run generator：显式 seed，不读写全局 RNG（§9）。"""
-    try:
-        generator = torch.Generator(device=device)
-    except RuntimeError as exc:  # 该设备后端不支持 generator
-        raise ConfigurationError(f"cannot create torch.Generator on device {device!r}") from exc
-    generator.manual_seed(seed)
-    return generator
 
 
 def assert_finite_samples(values: np.ndarray, *, symbol: str) -> None:
@@ -184,8 +174,8 @@ class KronosSampler:
         y_stamp = time_stamp_frame([self._session_close(day) for day in future_sessions])
 
         sampling = request.sampling
-        generator = build_generator(sampling.seed, self._runtime.device_class)
-        decoded = self._decode_tokens(x_norm, x_stamp, y_stamp, sampling, generator)
+        run_rng = RunRNG(seed=sampling.seed, device_class=self._runtime.device_class)
+        decoded = self._decode_tokens(x_norm, x_stamp, y_stamp, sampling, run_rng)
 
         values = decoded * (x_std + NORM_EPS) + x_mean
         assert_finite_samples(values, symbol=history.symbol)
@@ -252,7 +242,7 @@ class KronosSampler:
         x_stamp: np.ndarray,
         y_stamp: np.ndarray,
         sampling: SamplingConfig,
-        generator: torch.Generator,
+        run_rng: RunRNG,
     ) -> np.ndarray:
         """单 symbol 自回归采样；返回 (sample_count, horizon, feature_count) 价格空间之外的
         归一化空间张量（尚未反归一化）。"""
@@ -321,11 +311,11 @@ class KronosSampler:
                     input_tokens[0], input_tokens[1], current_stamp
                 )
                 s1_logits = s1_logits[:, -1, :]
-                sample_pre = self._sample(s1_logits, sampling, generator)
+                sample_pre = run_rng.sample_logits(s1_logits, sampling)
 
                 s2_logits = model.decode_s2(context, sample_pre)  # type: ignore[operator]
                 s2_logits = s2_logits[:, -1, :]
-                sample_post = self._sample(s2_logits, sampling, generator)
+                sample_post = run_rng.sample_logits(s2_logits, sampling)
 
                 generated_pre[:, step] = sample_pre.squeeze(-1)
                 generated_post[:, step] = sample_post.squeeze(-1)
@@ -373,14 +363,3 @@ class KronosSampler:
         from tqdm import tqdm
 
         return tqdm(range(horizon), desc="kronos sampling", leave=False)
-
-    @staticmethod
-    def _sample(
-        logits: torch.Tensor, sampling: SamplingConfig, generator: torch.Generator
-    ) -> torch.Tensor:
-        """上游 sample_from_logits 的 generator 版本（每个 step 的 s1/s2 共用同一 generator）。"""
-        logits = logits / sampling.temperature
-        if sampling.top_k > 0 or sampling.top_p < 1.0:
-            logits = top_k_top_p_filtering(logits, top_k=sampling.top_k, top_p=sampling.top_p)
-        probs = torch.softmax(logits, dim=-1)
-        return torch.multinomial(probs, num_samples=1, generator=generator)
