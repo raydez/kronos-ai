@@ -49,6 +49,7 @@ markers = [
     "integration: requires real model weights or network; skipped by default",
     "benchmark: long-running benchmark smoke tests; run on demand",
     "leakage: leakage guard tests; mandatory in CI",
+    "regression: cross-implementation equivalence and raw-sample regressions; mandatory in CI",
 ]
 
 [tool.coverage.run]
