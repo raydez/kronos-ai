@@ -14,6 +14,7 @@ from typing import Any, cast, get_args
 from kronos_ai.domain.forecast import ForecastResult, SamplingConfig
 from kronos_ai.domain.hashing import canonical_json
 from kronos_ai.domain.time import KnowledgeCutoffPolicy, cutoff_policy_record
+from kronos_ai.infrastructure.persistence.run_registry import RunRecord
 
 
 def sampling_from_args(args: Namespace) -> SamplingConfig:
@@ -120,6 +121,23 @@ def print_forecast(result: ForecastResult, *, args: Namespace, cutoff: datetime)
         print(json.dumps(forecast_summary_payload(result, cutoff=summary)))
     else:
         print(format_forecast_summary(result, cutoff=summary))
+
+
+def format_run_record(record: RunRecord) -> str:
+    """单行 run 摘要（run show / run list 共用）；完整 metadata 由命令单独打印。"""
+    parts = [
+        record.run_id,
+        record.status,
+        record.kind,
+        record.created_at.isoformat(),
+    ]
+    if record.config_hash is not None:
+        parts.append(f"config={record.config_hash[:12]}")
+    if record.dataset_hash is not None:
+        parts.append(f"dataset={record.dataset_hash[:12]}")
+    if record.error:
+        parts.append(f"error={record.error!r}")
+    return "  ".join(parts)
 
 
 def calendar_span(market_date: date, horizon: int) -> tuple[date, date]:

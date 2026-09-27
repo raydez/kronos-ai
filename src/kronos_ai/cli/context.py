@@ -22,11 +22,18 @@ from kronos_ai.registry import RuntimeRegistry
 # BaoStock adjustflag：3=不复权，1=后复权，2=前复权（RX-KAI-004/006）
 ADJUST_MODE_TO_FLAG: dict[AdjustmentMode, str] = {"raw": "3", "hfq": "1", "qfq": "2"}
 
-DEFAULT_RUNS_DIR = Path("artifacts/runs")
+DEFAULT_ARTIFACTS_DIR = Path("artifacts")
+INDEX_DB_FILENAME = "index.sqlite3"
 
 
-def default_runs_dir() -> Path:
-    return Path(os.environ.get("KRONOS_AI_RUNS_DIR", str(DEFAULT_RUNS_DIR)))
+def default_artifacts_dir() -> Path:
+    """artifact root（§33）；``KRONOS_AI_ARTIFACTS_DIR`` 可覆盖。"""
+    return Path(os.environ.get("KRONOS_AI_ARTIFACTS_DIR", str(DEFAULT_ARTIFACTS_DIR)))
+
+
+def index_db_path_for(artifacts_dir: Path) -> Path:
+    """§30 的 SQLite run registry + artifact index 默认位置。"""
+    return artifacts_dir / INDEX_DB_FILENAME
 
 
 def build_forecast_service(args: Namespace, cutoff: datetime) -> ForecastService:

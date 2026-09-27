@@ -26,6 +26,9 @@ from kronos_ai.errors import ArtifactError, ProviderError
 from kronos_ai.forecast.backends.kronos.backend import KronosForecastBackend
 from kronos_ai.forecast.cache import FileSystemForecastCache
 from kronos_ai.forecast.service import ForecastService
+from kronos_ai.infrastructure.persistence.artifact_store import ArtifactStore
+from kronos_ai.infrastructure.persistence.run_registry import RunRecord, RunRegistry
+from kronos_ai.infrastructure.persistence.schema import open_database
 from kronos_ai.infrastructure.providers.baostock import ADJUST_FLAG_TO_MODE
 
 MARKET_DATE = date(2026, 9, 25)
@@ -282,27 +285,127 @@ def test_run_forecast_force_bypasses_cache(
     assert calls == 2
 
 
-def test_run_show_reads_metadata(
+def _seed_run(
+    root: Path,
+    run_id: str,
+    *,
+    kind: str = "forecast",
+    status: str = "succeeded",
+    with_metadata: bool = True,
+) -> None:
+    """在临时 artifact root 登记一个 run，并按需写入 metadata artifact（§30/§32）。"""
+    database = open_database(root / "index.sqlite3")
+    created = datetime(2026, 9, 25, 18, 0, tzinfo=CN_TZ)
+    try:
+        registry = RunRegistry(database)
+        store = ArtifactStore(root, database)
+        registry.register(
+            RunRecord(
+                run_id=run_id,
+                kind=kind,
+                status="pending",
+                created_at=created,
+                updated_at=created,
+                config_hash="a" * 64,
+                dataset_hash="b" * 64,
+                dedup_key=f"{kind}:{run_id}",
+                run_dir=f"runs/{run_id}",
+            )
+        )
+        if with_metadata:
+            store.write_json(run_id, "metadata", {"run_id": run_id, "kind": kind})
+        if status != "pending":
+            registry.update_status(
+                run_id, status, now=datetime(2026, 9, 25, 18, 5, tzinfo=CN_TZ)
+            )
+    finally:
+        database.close()
+
+
+def test_run_show_reports_registered_run(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    run_id = "01J8Z0000000000000000000000"
-    run_dir = tmp_path / run_id
-    run_dir.mkdir(parents=True)
-    (run_dir / "metadata.json").write_text(
-        json.dumps({"run_id": run_id, "kind": "forecast"}), encoding="utf-8"
-    )
+    run_id = "01ARZ3NDEKTSV4RRFFQ69G5FA0"
+    _seed_run(tmp_path, run_id)
     parser = build_parser()
-    args = parser.parse_args(["run", "show", run_id, "--runs-dir", str(tmp_path), "--json"])
+    args = parser.parse_args(
+        ["run", "show", run_id, "--artifacts-dir", str(tmp_path), "--json"]
+    )
     assert commands.run_show(args) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["run_id"] == run_id
+    assert payload["run"]["run_id"] == run_id
+    assert payload["run"]["status"] == "succeeded"
+    assert payload["run"]["kind"] == "forecast"
+    assert payload["metadata"] == {"run_id": run_id, "kind": "forecast"}
+    assert [item["name"] for item in payload["artifacts"]] == ["metadata"]
+
+
+def test_run_show_text_output_lists_artifacts(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    run_id = "01ARZ3NDEKTSV4RRFFQ69G5FA0"
+    _seed_run(tmp_path, run_id)
+    parser = build_parser()
+    args = parser.parse_args(["run", "show", run_id, "--artifacts-dir", str(tmp_path)])
+    assert commands.run_show(args) == 0
+    out = capsys.readouterr().out
+    assert run_id in out
+    assert "metadata" in out
 
 
 def test_run_show_missing_run_raises(tmp_path: Path) -> None:
+    # 库存在但 run 不存在 -> 显式失败；库不存在时的失败见 test_run_read_only_commands_...
+    _seed_run(tmp_path, "01ARZ3NDEKTSV4RRFFQ69G5FA9")
     parser = build_parser()
-    args = parser.parse_args(["run", "show", "nope", "--runs-dir", str(tmp_path)])
-    with pytest.raises(ArtifactError, match="not found"):
+    args = parser.parse_args(
+        ["run", "show", "01ARZ3NDEKTSV4RRFFQ69G5FA0", "--artifacts-dir", str(tmp_path)]
+    )
+    with pytest.raises(ArtifactError, match="not registered"):
         commands.run_show(args)
+
+
+def test_run_read_only_commands_do_not_create_store(tmp_path: Path) -> None:
+    parser = build_parser()
+    list_args = parser.parse_args(["run", "list", "--artifacts-dir", str(tmp_path)])
+    show_args = parser.parse_args(
+        ["run", "show", "01ARZ3NDEKTSV4RRFFQ69G5FA0", "--artifacts-dir", str(tmp_path)]
+    )
+    with pytest.raises(ArtifactError, match="run registry not found"):
+        commands.run_list(list_args)
+    with pytest.raises(ArtifactError, match="run registry not found"):
+        commands.run_show(show_args)
+    assert not (tmp_path / "index.sqlite3").exists()
+
+
+def test_run_list_filters_and_json(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _seed_run(tmp_path, "01ARZ3NDEKTSV4RRFFQ69G5FA0", kind="forecast", status="succeeded")
+    _seed_run(tmp_path, "01ARZ3NDEKTSV4RRFFQ69G5FA1", kind="forecast", status="failed")
+    _seed_run(tmp_path, "01ARZ3NDEKTSV4RRFFQ69G5FA2", kind="benchmark", status="succeeded")
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "run",
+            "list",
+            "--kind",
+            "forecast",
+            "--status",
+            "succeeded",
+            "--artifacts-dir",
+            str(tmp_path),
+            "--json",
+        ]
+    )
+    assert commands.run_list(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [item["run_id"] for item in payload] == ["01ARZ3NDEKTSV4RRFFQ69G5FA0"]
+
+
+def test_run_list_rejects_unknown_status(tmp_path: Path) -> None:
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["run", "list", "--status", "nope", "--artifacts-dir", str(tmp_path)])
 
 
 def test_module_entrypoint_exposed(capsys: pytest.CaptureFixture[str]) -> None:

@@ -14,6 +14,7 @@ def test_phase1_subpackages_exist() -> None:
         "kronos_ai.forecast",
         "kronos_ai.forecast.backends.kronos",
         "kronos_ai.infrastructure.providers",
+        "kronos_ai.infrastructure.persistence",
         "kronos_ai.cli",
     ):
         importlib.import_module(mod)

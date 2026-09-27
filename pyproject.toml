@@ -9,7 +9,9 @@ authors = [{ name = "Kronos-AI maintainers" }]
 dependencies = [
     "baostock==0.9.4",
     "pandas>=2.1",
+    "pyarrow>=15",
     "pydantic>=2.5,<3",
+    "pyyaml>=6.0",
     "tzdata>=2026.4",
 ]
 

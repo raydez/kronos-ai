@@ -522,7 +522,7 @@ class TestFileSystemForecastCache:
         def boom(*args: object, **kwargs: object) -> None:
             raise OSError("simulated replace failure")
 
-        monkeypatch.setattr("kronos_ai.forecast.cache.os.replace", boom)
+        monkeypatch.setattr("kronos_ai.atomic_io.os.replace", boom)
         with pytest.raises(OSError, match="simulated replace failure"):
             cache.put(key, make_result(artifact_id=key.digest))
 

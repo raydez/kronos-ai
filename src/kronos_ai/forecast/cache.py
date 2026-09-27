@@ -16,9 +16,6 @@
 
 from __future__ import annotations
 
-import errno
-import os
-import tempfile
 from collections.abc import Callable, Mapping
 from datetime import date, datetime
 from pathlib import Path
@@ -26,6 +23,7 @@ from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator, model_validator
 
+from kronos_ai.atomic_io import atomic_write_bytes
 from kronos_ai.data.calendar import TradingCalendar
 from kronos_ai.domain.forecast import (
     FORECAST_AGGREGATION_DEFINITION_VERSION,
@@ -316,61 +314,8 @@ def _artifact_path(root: Path, digest: str) -> Path:
     return root / digest[:2] / f"{digest}.json"
 
 
-def _atomic_write_bytes(path: Path, data: bytes) -> None:
-    """临时文件 + fsync + 原子 rename；并发写同一 key 时读者只会看到完整文件。
-
-    临时文件用 ``tempfile.mkstemp``（``O_EXCL`` + 随机后缀）创建：唯一性由内核保证，
-    不依赖 32-bit 随机数；否则同进程多线程并发写同一 key 时名字可能碰撞，
-    导致一个 writer 的 ``finally`` 删掉另一个 writer 正在写的临时文件。
-    代价是文件权限为 mkstemp 的 0600（本地研究 artifact，比默认 0644 更严格）。
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    tmp = Path(tmp_name)
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(data)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(tmp, path)
-        _fsync_dir(path.parent)
-    finally:
-        # os.replace 成功后 tmp 已不存在；异常路径下清理半成品。
-        tmp.unlink(missing_ok=True)
-
-
-# 目录 fsync 在部分平台 / 文件系统上不被支持：这些 errno 视为可跳过，其余（如 EIO）
-# 必须显式上抛，避免把「rename 未持久化」静默当成成功（§3.2）。
-_DIR_FSYNC_UNSUPPORTED = {
-    errno.EINVAL,
-    getattr(errno, "ENOTSUP", errno.EINVAL),
-    errno.EBADF,
-    errno.EPERM,
-    errno.EACCES,
-    errno.EROFS,
-}
-
-
-def _fsync_dir(directory: Path) -> None:
-    """把 rename 持久化到父目录：只 fsync 文件不保证崩溃后 rename 仍在（§15）。
-
-    平台差异：Windows 无法 open 目录，``O_DIRECTORY`` 仅 POSIX 可用；这类
-    「不支持」情形跳过即可（缓存本身可重算），但真实的 I/O 错误必须上抛。
-    """
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-    try:
-        dir_fd = os.open(directory, flags)
-    except OSError as exc:
-        if exc.errno in _DIR_FSYNC_UNSUPPORTED:
-            return
-        raise
-    try:
-        os.fsync(dir_fd)
-    except OSError as exc:
-        if exc.errno not in _DIR_FSYNC_UNSUPPORTED:
-            raise
-    finally:
-        os.close(dir_fd)
+# 原子写入（临时文件 + fsync + rename + 父目录 fsync）已提取到 kronos_ai.atomic_io，
+# 与 Artifact Store（§30）共用同一套崩溃安全保证。
 
 
 class FileSystemForecastCache:
@@ -407,7 +352,7 @@ class FileSystemForecastCache:
     def put(self, key: ForecastArtifactKey, result: ForecastResult) -> None:
         self._verify(key, None, result)
         payload = canonical_json(result.model_dump(mode="json")).encode("utf-8")
-        _atomic_write_bytes(self.path_for(key), payload)
+        atomic_write_bytes(self.path_for(key), payload)
 
     @staticmethod
     def _decode(path: Path, raw: bytes) -> ForecastResult:

@@ -23,6 +23,7 @@ from collections.abc import Callable
 from typing import Protocol, get_args
 
 from kronos_ai.cli import commands
+from kronos_ai.domain.run import RUN_STATUSES
 from kronos_ai.domain.time import KnowledgeCutoffPolicy
 from kronos_ai.errors import KronosAIError
 
@@ -85,11 +86,32 @@ def build_parser() -> argparse.ArgumentParser:
 
     run = sub.add_parser("run", help="inspect stored runs")
     run_sub = run.add_subparsers(dest="run_command")
-    show = run_sub.add_parser("show", help="show run metadata")
+
+    def add_store_args(target: argparse.ArgumentParser) -> None:
+        target.add_argument(
+            "--artifacts-dir",
+            default=None,
+            help="artifact root (§33); defaults to $KRONOS_AI_ARTIFACTS_DIR or ./artifacts",
+        )
+        target.add_argument(
+            "--index-db",
+            default=None,
+            help="SQLite run registry + artifact index (§30); defaults to <artifacts-dir>/index.sqlite3",
+        )
+
+    show = run_sub.add_parser("show", help="show one run and its artifacts")
     show.add_argument("run_id")
-    show.add_argument("--runs-dir", default=None)
     show.add_argument("--json", action="store_true")
+    add_store_args(show)
     show.set_defaults(handler=commands.run_show)
+
+    list_runs = run_sub.add_parser("list", help="list registered runs")
+    list_runs.add_argument("--kind", default=None)
+    list_runs.add_argument("--status", default=None, choices=RUN_STATUSES)
+    list_runs.add_argument("--limit", type=int, default=None)
+    list_runs.add_argument("--json", action="store_true")
+    add_store_args(list_runs)
+    list_runs.set_defaults(handler=commands.run_list)
 
     return parser
 
