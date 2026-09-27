@@ -6,8 +6,10 @@ import pytest
 from pydantic import ValidationError
 
 from kronos_ai.domain.forecast import (
+    FORECAST_AGGREGATION_DEFINITION_VERSION,
     FORECAST_METRIC_NAMES,
     FORECAST_METRIC_REGISTRY_VERSION,
+    SUPPORTED_FORECAST_AGGREGATION_VERSIONS,
     ForecastDistribution,
     ForecastPoint,
     ForecastResult,
@@ -50,6 +52,7 @@ def distribution(**overrides: object) -> ForecastDistribution:
     fields: dict[str, object] = {
         "horizon": 2,
         "sample_count": 3,
+        "origin_close": 100.0,
         "expected_return": 0.01,
         "median_return": 0.0,
         "threshold_probabilities": (
@@ -64,6 +67,7 @@ def distribution(**overrides: object) -> ForecastDistribution:
         "distribution_spec_version": "distribution-spec-v1",
         "distribution_spec_hash": SPEC_HASH,
         "metric_definition_version": FORECAST_METRIC_REGISTRY_VERSION,
+        "aggregation_definition_version": FORECAST_AGGREGATION_DEFINITION_VERSION,
     }
     fields.update(overrides)
     return ForecastDistribution(**fields)  # type: ignore[arg-type]
@@ -159,6 +163,27 @@ class TestForecastDistribution:
     def test_distribution_spec_version_required(self) -> None:
         with pytest.raises(ValidationError, match="distribution_spec_version"):
             distribution(distribution_spec_version="")
+
+    def test_aggregation_definition_version_required(self) -> None:
+        with pytest.raises(ValidationError, match="aggregation_definition_version"):
+            distribution(aggregation_definition_version="")
+
+    def test_unknown_aggregation_definition_version_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="unsupported aggregation_definition_version"):
+            distribution(aggregation_definition_version="forecast-aggregation-v999")
+
+    def test_origin_close_required_positive_finite(self) -> None:
+        assert distribution().origin_close == 100.0
+        for bad in (0.0, -1.0, float("nan"), float("inf")):
+            with pytest.raises(ValidationError, match="origin_close"):
+                distribution(origin_close=bad)
+
+    def test_fixture_aggregation_version_is_supported(self) -> None:
+        # 夹具必须使用当前受支持的聚合口径版本，否则后续用例会在错误前提下运行
+        assert (
+            distribution().aggregation_definition_version
+            in SUPPORTED_FORECAST_AGGREGATION_VERSIONS
+        )
 
     def test_duplicate_thresholds_rejected(self) -> None:
         dup = ThresholdProbability(

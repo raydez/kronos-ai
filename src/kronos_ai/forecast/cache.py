@@ -27,7 +27,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 
 from kronos_ai.data.calendar import TradingCalendar
 from kronos_ai.domain.forecast import (
+    FORECAST_AGGREGATION_DEFINITION_VERSION,
     FORECAST_CONTRACT_VERSION,
+    FORECAST_METRIC_REGISTRY_VERSION,
     ForecastRequest,
     ForecastResult,
 )
@@ -412,6 +414,20 @@ class FileSystemForecastCache:
             result.distribution.distribution_spec_hash == key.distribution_spec_hash,
             f"distribution_spec_hash {result.distribution.distribution_spec_hash!r} != key "
             f"{key.distribution_spec_hash!r}",
+        )
+        # 直接用版本号再校一次：spec hash 已折叠两者，但显式比对能给出可读错误，
+        # 并防止未来重构把版本号从 hash 中悄然移除而无人发现。
+        check(
+            result.distribution.metric_definition_version == FORECAST_METRIC_REGISTRY_VERSION,
+            f"metric_definition_version {result.distribution.metric_definition_version!r} != "
+            f"current {FORECAST_METRIC_REGISTRY_VERSION!r}",
+        )
+        check(
+            result.distribution.aggregation_definition_version
+            == FORECAST_AGGREGATION_DEFINITION_VERSION,
+            f"aggregation_definition_version "
+            f"{result.distribution.aggregation_definition_version!r} != "
+            f"current {FORECAST_AGGREGATION_DEFINITION_VERSION!r}",
         )
         for field in ("seed", "sample_count", "temperature", "top_k", "top_p"):
             actual = getattr(result.sampling, field)

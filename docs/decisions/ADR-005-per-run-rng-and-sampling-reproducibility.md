@@ -31,15 +31,20 @@ generator 版与全局版下对同 seed 抽出一致的结果（已在 RX-KAI-01
 
 落点（RX-KAI-011）：`forecast/backends/kronos/rng.py` 的 `RunRNG` 是唯一构造点与唯一
 采样入口。generator 是单下划线约定的私有字段，采样只能走
-`RunRNG.sample_logits(logits, sampling)`：这样「新增采样点漏传 generator」不再可能——
+`RunRNG.sample_logits(logits)`：这样「新增采样点漏传 generator」不再可能——
 没有 generator 可供绕开，只能显式走同一条随机流。该约定由仓库级守卫测试加固：
-`tests/unit/test_rng.py` 断言 `torch.multinomial` 只允许出现在 `rng.py`（vendor 白名单除外）。
+`tests/unit/test_rng.py` 断言 `torch.multinomial` 及 `rand/randn/normal/uniform/randint/randperm/bernoulli` 等隐式读全局 RNG 的算子只允许出现在 `rng.py`（vendor 白名单除外）。
 
 ```python
-run_rng = RunRNG(seed=sampling.seed, device_class=self._runtime.device_class)
-sample_pre = run_rng.sample_logits(s1_logits, sampling)   # s1
-sample_post = run_rng.sample_logits(s2_logits, sampling)  # s2
+run_rng = RunRNG(request.sampling, device_class=self._runtime.device_class)
+sample_pre = run_rng.sample_logits(s1_logits)   # s1
+sample_post = run_rng.sample_logits(s2_logits)  # s2
 ```
+
+采样参数只有一个来源：``RunRNG`` 从 :class:`SamplingConfig` 构造并持有它，
+``sample_logits`` 不再接收 config。因此不存在「run 用某个 seed 采样、metadata 记录
+另一个 seed」的分叉可能——评审曾指出旧签名 ``RunRNG(seed=...)`` +
+``sample_logits(logits, config)`` 允许两处 seed 不一致。
 
 `RunRNG.__init__` 内部：`torch.Generator(device=device_class)`（device 不支持时
 `ConfigurationError`）+ `generator.manual_seed(seed)`（seed 来自 `SamplingConfig`，契约

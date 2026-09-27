@@ -157,5 +157,14 @@ mean(v2 raw samples, axis=sample) == auto_regressive_inference(...) 的输出
 - **数学定义显式化**（§13）：收益类指标 `P_0 = forecast origin close`；`max_drawdown`
   与 `path_volatility` 的 close path 含 `P_0`；离散度与波动率用总体标准差（ddof=0，
   样本集即完整经验分布）。`P_0` 或任一 close 非正/非有限 → `ModelInferenceError`（§3.2）。
+  `P_0` 现已作为 `ForecastDistribution.origin_close` 落盘（正且有限），§13 全部收益/
+  回撤/波动指标因此不依赖外部输入即可被第三方独立重算；该 schema 增补（连同下面的
+  聚合口径版本）把 `FORECAST_CONTRACT_VERSION` 升到 `forecast-contract-v3`。
+- **聚合口径版本化**（评审加固）：跨样本聚合语义（`median_return`、总体标准差
+  `forecast_dispersion` ddof=0、`expected_return` 均值、per-sample MDD/波动率取均值）
+  由 `FORECAST_AGGREGATION_DEFINITION_VERSION` 标识，并以
+  `ForecastDistribution.aggregation_definition_version` 落盘（白名单
+  `SUPPORTED_FORECAST_AGGREGATION_VERSIONS`）。它与 `metric_definition_version` 对称：
+  改动聚合口径必须升版本，cache `_verify` 逐维比对，旧 artifact 显式失效。
 - **`generate_samples` 不消费 `origin_close`**：分布是独立步骤（需要 `P_0`），
   由调用方显式提供；采样层不持有「分布」语义。

@@ -51,7 +51,7 @@ import pandas as pd
 import torch
 
 from kronos_ai.data.calendar import TradingCalendar
-from kronos_ai.domain.forecast import ForecastRequest, ForecastSample, SamplingConfig
+from kronos_ai.domain.forecast import ForecastRequest, ForecastSample
 from kronos_ai.domain.market import MarketBar, MarketHistory
 from kronos_ai.domain.time import CN_TZ, MARKET_SESSION_CLOSE
 from kronos_ai.errors import (
@@ -175,8 +175,10 @@ class KronosSampler:
         y_stamp = time_stamp_frame([self._session_close(day) for day in future_sessions])
 
         sampling = request.sampling
-        run_rng = RunRNG(seed=sampling.seed, device_class=self._runtime.device_class)
-        decoded = self._decode_tokens(x_norm, x_stamp, y_stamp, sampling, run_rng)
+        run_rng = RunRNG(sampling, device_class=self._runtime.device_class)
+        decoded = self._decode_tokens(
+            x_norm, x_stamp, y_stamp, sample_count=sampling.sample_count, run_rng=run_rng
+        )
 
         values = decoded * (x_std + NORM_EPS) + x_mean
         assert_finite_samples(values, symbol=history.symbol)
@@ -253,7 +255,8 @@ class KronosSampler:
         x: np.ndarray,
         x_stamp: np.ndarray,
         y_stamp: np.ndarray,
-        sampling: SamplingConfig,
+        *,
+        sample_count: int,
         run_rng: RunRNG,
     ) -> np.ndarray:
         """单 symbol 自回归采样；返回 (sample_count, horizon, feature_count) 价格空间之外的
@@ -262,7 +265,6 @@ class KronosSampler:
         dtype = runtime.config.torch_dtype
         device = torch.device(runtime.device_class)
         max_context = runtime.config.max_context
-        sample_count = sampling.sample_count
         horizon = y_stamp.shape[0]
 
         with torch.no_grad():
@@ -323,11 +325,11 @@ class KronosSampler:
                     input_tokens[0], input_tokens[1], current_stamp
                 )
                 s1_logits = s1_logits[:, -1, :]
-                sample_pre = run_rng.sample_logits(s1_logits, sampling)
+                sample_pre = run_rng.sample_logits(s1_logits)
 
                 s2_logits = model.decode_s2(context, sample_pre)  # type: ignore[operator]
                 s2_logits = s2_logits[:, -1, :]
-                sample_post = run_rng.sample_logits(s2_logits, sampling)
+                sample_post = run_rng.sample_logits(s2_logits)
 
                 generated_pre[:, step] = sample_pre.squeeze(-1)
                 generated_post[:, step] = sample_post.squeeze(-1)

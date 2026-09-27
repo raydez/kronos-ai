@@ -24,6 +24,7 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from kronos_ai.domain.forecast import (
+    FORECAST_AGGREGATION_DEFINITION_VERSION,
     FORECAST_METRIC_REGISTRY_VERSION,
     ForecastDistribution,
     ForecastMetricName,
@@ -128,13 +129,18 @@ DEFAULT_DISTRIBUTION_SPEC = DistributionSpec(
 def distribution_spec_hash(spec: DistributionSpec = DEFAULT_DISTRIBUTION_SPEC) -> str:
     """DistributionSpec 的确定性 hash（进 ForecastArtifactKey 与 ForecastDistribution）。
 
-    同时折叠 ``FORECAST_METRIC_REGISTRY_VERSION``：指标数学定义变化会改变分布取值，
-    必须让旧 artifact 失效（§12/§15）。
+    同时折叠 ``FORECAST_METRIC_REGISTRY_VERSION``（指标数学定义）与
+    ``FORECAST_AGGREGATION_DEFINITION_VERSION``（跨样本聚合口径）：二者变化都会改变
+    分布取值，必须让旧 artifact 失效（§12/§15）。
+
+    版本号唯一来源是 ``spec.version``（在 ``spec.hashing_payload`` 内）；此处不再另写
+    模块级 DISTRIBUTION_SPEC_VERSION，避免同一版本号在 payload 中出现两次、且两处
+    可能不一致。
     """
     return sha256_hex(
         {
             "kind": "distribution_spec",
-            "distribution_spec_version": DISTRIBUTION_SPEC_VERSION,
+            "aggregation_definition_version": FORECAST_AGGREGATION_DEFINITION_VERSION,
             "metric_definition_version": FORECAST_METRIC_REGISTRY_VERSION,
             "spec": spec.hashing_payload(),
         }
@@ -209,6 +215,10 @@ def build_distribution(
     return ForecastDistribution(
         horizon=raw.horizon,
         sample_count=raw.sample_count,
+        origin_close=float(origin_close),
+        # 聚合口径：expected_return/median_return=逐样本 horizon_return 的 mean/median；
+        # forecast_dispersion=总体标准差（ddof=0）；max_drawdown/path_volatility 取均值。
+        # 改任一聚合方式必须升级 FORECAST_AGGREGATION_DEFINITION_VERSION（§13）。
         expected_return=float(horizon_returns.mean()),
         median_return=float(np.median(horizon_returns)),
         threshold_probabilities=thresholds,
@@ -219,6 +229,7 @@ def build_distribution(
         distribution_spec_version=spec.version,
         distribution_spec_hash=distribution_spec_hash(spec),
         metric_definition_version=FORECAST_METRIC_REGISTRY_VERSION,
+        aggregation_definition_version=FORECAST_AGGREGATION_DEFINITION_VERSION,
     )
 
 

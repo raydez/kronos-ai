@@ -20,8 +20,8 @@ CUTOFF = datetime(2026, 9, 25, 18, 0, tzinfo=CN_TZ)
 # Golden hashes：hashing_payload 形状的变更检测器。若本测试失败，说明契约 payload
 # 变了——必须升级 FORECAST_CONTRACT_VERSION、更新常量，并确认既有 ForecastArtifactKey
 # 失效是预期行为（§15），不得直接改常量让测试变绿。
-GOLDEN_SAMPLING_HASH = "07e3da275be0e0b11ca2b12270bbdcb3078caeff6e0d7405febd5cabaff02157"
-GOLDEN_REQUEST_HASH = "f3932345c584f8e4a61c39e859b8af7ccfa63fd1666bf42594ceea4672ee8373"
+GOLDEN_SAMPLING_HASH = "cfa270082e8a19c758d585a16333427fe228666cb19fd4d17ea59f61d55b8b9d"
+GOLDEN_REQUEST_HASH = "ba54d58a4bb608efb6a5172970bbac0522392713fc77fec3573fe02c1a796100"
 
 
 def sampling(**overrides: object) -> SamplingConfig:

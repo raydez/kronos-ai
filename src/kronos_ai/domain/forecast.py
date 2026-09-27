@@ -29,7 +29,7 @@ from pydantic import (
 from kronos_ai.domain.symbols import validate_normalized_symbol
 from kronos_ai.domain.time import ResearchTime, ensure_shanghai_aware
 
-FORECAST_CONTRACT_VERSION = "forecast-contract-v2"
+FORECAST_CONTRACT_VERSION = "forecast-contract-v3"
 
 HASH_KIND_SAMPLING = "sampling_config"
 HASH_KIND_REQUEST = "forecast_request"
@@ -204,9 +204,17 @@ class ForecastRequest(BaseModel):
 
 FORECAST_METRIC_REGISTRY_VERSION = "forecast-metrics-v1"
 
+# 跨样本聚合口径（expected_return / median_return / forecast_dispersion 等）的版本。
+# 它不属于单个 metric 的数学定义，但同样影响 ForecastDistribution 取值，因此单独版本化，
+# 并随 distribution_spec_hash 进入 ForecastArtifactKey：改聚合口径必须让旧 artifact 失效。
+FORECAST_AGGREGATION_DEFINITION_VERSION = "forecast-aggregation-v1"
+
 # 旧 artifact 必须仍可反序列化：升级数学定义时把旧版本号追加进来，
 # 而不是删除（删除会让历史 ForecastDistribution 无法加载）。
 SUPPORTED_FORECAST_METRIC_VERSIONS: tuple[str, ...] = (FORECAST_METRIC_REGISTRY_VERSION,)
+SUPPORTED_FORECAST_AGGREGATION_VERSIONS: tuple[str, ...] = (
+    FORECAST_AGGREGATION_DEFINITION_VERSION,
+)
 
 
 class ForecastMetricDefinition(BaseModel):
@@ -266,6 +274,16 @@ def _validate_metric_version(value: str) -> str:
         raise ValueError(
             f"unsupported metric_definition_version {value!r}; "
             f"known versions: {list(SUPPORTED_FORECAST_METRIC_VERSIONS)}"
+        )
+    return value
+
+
+def _validate_aggregation_version(value: str) -> str:
+    value = _require_nonempty(value, "aggregation_definition_version")
+    if value not in SUPPORTED_FORECAST_AGGREGATION_VERSIONS:
+        raise ValueError(
+            f"unsupported aggregation_definition_version {value!r}; "
+            f"known versions: {list(SUPPORTED_FORECAST_AGGREGATION_VERSIONS)}"
         )
     return value
 
@@ -398,6 +416,11 @@ class ForecastDistribution(BaseModel):
     horizon: int = Field(ge=1)
     sample_count: int = Field(ge=1)
 
+    # forecast origin close P_0：§13 的收益/回撤/波动指标全部以它为基准。
+    # 落盘原因：没有它，artifact 无法被第三方独立重算/审计（P_0 只隐含在
+    # input_data_hash + lookback_bars 里，不可反推）。必须为正且有限。
+    origin_close: float
+
     expected_return: float
     median_return: float
 
@@ -411,11 +434,20 @@ class ForecastDistribution(BaseModel):
     distribution_spec_version: str
     distribution_spec_hash: Hash256
     metric_definition_version: str
+    aggregation_definition_version: str
 
     @field_validator("horizon", "sample_count", mode="before")
     @classmethod
     def _counts_not_bool(cls, value: object, info: ValidationInfo) -> object:
         _reject_bool(value, str(info.field_name))
+        return value
+
+    @field_validator("origin_close")
+    @classmethod
+    def _origin_close_positive(cls, value: float) -> float:
+        _validate_finite(value, "origin_close")
+        if value <= 0:
+            raise ValueError("origin_close must be positive to anchor return metrics")
         return value
 
     @field_validator(
@@ -438,6 +470,11 @@ class ForecastDistribution(BaseModel):
     @classmethod
     def _metric_version_known(cls, value: str) -> str:
         return _validate_metric_version(value)
+
+    @field_validator("aggregation_definition_version")
+    @classmethod
+    def _aggregation_version_known(cls, value: str) -> str:
+        return _validate_aggregation_version(value)
 
     @model_validator(mode="after")
     def _no_duplicate_entries(self) -> ForecastDistribution:

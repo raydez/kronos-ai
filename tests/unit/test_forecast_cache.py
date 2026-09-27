@@ -11,9 +11,8 @@ from pydantic import ValidationError
 
 from kronos_ai.data.calendar import StaticTradingCalendar
 from kronos_ai.domain.forecast import (
-    ForecastDistribution as Distribution,
-)
-from kronos_ai.domain.forecast import (
+    FORECAST_AGGREGATION_DEFINITION_VERSION,
+    FORECAST_METRIC_REGISTRY_VERSION,
     ForecastPoint,
     ForecastRequest,
     ForecastResult,
@@ -23,6 +22,9 @@ from kronos_ai.domain.forecast import (
     SamplingConfig,
     SamplingMetadata,
     ThresholdProbability,
+)
+from kronos_ai.domain.forecast import (
+    ForecastDistribution as Distribution,
 )
 from kronos_ai.domain.hashing import canonical_json
 from kronos_ai.domain.time import CN_TZ, MARKET_SESSION_CLOSE
@@ -115,6 +117,7 @@ def make_result(
     distribution = Distribution(
         horizon=len(sessions),
         sample_count=2,
+        origin_close=close,
         expected_return=0.01,
         median_return=0.01,
         threshold_probabilities=(
@@ -126,9 +129,10 @@ def make_result(
         forecast_dispersion=0.0,
         expected_max_drawdown=0.0,
         expected_path_volatility=0.0,
-        distribution_spec_version="distribution-spec-v1",
+        distribution_spec_version=DEFAULT_DISTRIBUTION_SPEC.version,
         distribution_spec_hash=spec_hash,
-        metric_definition_version="forecast-metrics-v1",
+        metric_definition_version=FORECAST_METRIC_REGISTRY_VERSION,
+        aggregation_definition_version=FORECAST_AGGREGATION_DEFINITION_VERSION,
     )
     return ForecastResult(
         symbol=symbol,
@@ -157,7 +161,7 @@ class TestForecastArtifactKey:
 
     def test_golden_digest(self) -> None:
         # golden：字段构成 / hashing payload / canonical json 任一改变都会让本断言变红。
-        assert make_key().digest == "055aea41dfa8e95d09f345868980438f32ca75ecc8d5208dc83038f84b3779d7"
+        assert make_key().digest == "25bebed3ea465dcc24297fe3cb4924e5e9bfa6667818e09bfcbeb4e900d077e1"
 
     def test_key_version_participates(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """key 版本必须真的进入 payload：只改版本号，digest 就得变（而非同名同义反复）。"""
@@ -628,6 +632,33 @@ class TestProvenanceVerification:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(canonical_json(foreign.model_dump(mode="json")).encode("utf-8"))
         with pytest.raises(ArtifactError, match="timeline"):
+            cache.get(key)
+
+    def test_get_rejects_artifact_with_stale_metric_version(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """指标数学版本升级后，旧 artifact 必须显式失效，而不是被静默读回。"""
+        cache = FileSystemForecastCache(tmp_path)
+        key = make_key()
+        cache.put(key, make_result(artifact_id=key.digest))
+        monkeypatch.setattr(
+            "kronos_ai.forecast.cache.FORECAST_METRIC_REGISTRY_VERSION", "forecast-metrics-v2"
+        )
+        with pytest.raises(ArtifactError, match="metric_definition_version"):
+            cache.get(key)
+
+    def test_get_rejects_artifact_with_stale_aggregation_version(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """跨样本聚合口径升级后，旧 artifact 必须显式失效。"""
+        cache = FileSystemForecastCache(tmp_path)
+        key = make_key()
+        cache.put(key, make_result(artifact_id=key.digest))
+        monkeypatch.setattr(
+            "kronos_ai.forecast.cache.FORECAST_AGGREGATION_DEFINITION_VERSION",
+            "forecast-aggregation-v2",
+        )
+        with pytest.raises(ArtifactError, match="aggregation_definition_version"):
             cache.get(key)
 
 

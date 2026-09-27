@@ -10,6 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from kronos_ai.domain.forecast import (
+    FORECAST_AGGREGATION_DEFINITION_VERSION,
     FORECAST_METRIC_NAMES,
     FORECAST_METRIC_REGISTRY_VERSION,
     ForecastRequest,
@@ -77,7 +78,9 @@ def test_horizon_return_and_thresholds() -> None:
 
     assert dist.horizon == 2
     assert dist.sample_count == 3
+    assert dist.origin_close == 100.0
     assert dist.metric_definition_version == FORECAST_METRIC_REGISTRY_VERSION
+    assert dist.aggregation_definition_version == FORECAST_AGGREGATION_DEFINITION_VERSION
     assert dist.distribution_spec_version == DEFAULT_DISTRIBUTION_SPEC.version
     assert dist.expected_return == pytest.approx(0.2 / 3)
     assert dist.median_return == pytest.approx(0.1)
@@ -138,7 +141,7 @@ class TestDistributionSpecHash:
     def test_golden_hash(self) -> None:
         assert (
             distribution_spec_hash()
-            == "6f5230d539f420bd38eb070a7e0ad1958a516811dc79faabc1465f9c9a66ecea"
+            == "b42e6d0e3c9816554514e4e5ddc2ea9c286bc7d649cbd8aaa4bd52213caed306"
         )
 
     def test_default_spec_roundtrips(self) -> None:
@@ -176,6 +179,30 @@ class TestDistributionSpecHash:
     def test_empty_spec_is_valid_and_distinct(self) -> None:
         empty = DistributionSpec(thresholds=(), quantiles=())
         assert distribution_spec_hash(empty) != distribution_spec_hash(DEFAULT_DISTRIBUTION_SPEC)
+
+    def test_hash_changes_with_spec_version_only(self) -> None:
+        """spec.version 是版本号唯一来源：只改它也得让 hash 变（不得被模块常量掩盖）。"""
+        base = DistributionSpec(version="distribution-spec-v1")
+        bumped = DistributionSpec(version="distribution-spec-v2")
+        assert distribution_spec_hash(base) != distribution_spec_hash(bumped)
+
+    def test_hash_folds_metric_registry_version(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        base = distribution_spec_hash()
+        monkeypatch.setattr(
+            "kronos_ai.forecast.distribution.FORECAST_METRIC_REGISTRY_VERSION",
+            "forecast-metrics-v2",
+        )
+        assert distribution_spec_hash() != base
+
+    def test_hash_folds_aggregation_version(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        base = distribution_spec_hash()
+        monkeypatch.setattr(
+            "kronos_ai.forecast.distribution.FORECAST_AGGREGATION_DEFINITION_VERSION",
+            "forecast-aggregation-v2",
+        )
+        assert distribution_spec_hash() != base
 
 
 def test_metric_series_covers_registry() -> None:

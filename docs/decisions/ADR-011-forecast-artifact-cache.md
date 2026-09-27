@@ -48,9 +48,10 @@ seed, sample_count, temperature, top_k, top_p
   `ForecastPoint.timestamp` 的取值。两份日历对同一 `(symbol, market_date, horizon)`
   可给出不同 session 序列，因此时间轴不同 = 输出不同，必须进 key。派生必须用
   **与 sampler 同一**的 `calendar.next_sessions`，否则 key 与推理实际时间轴脱钩。
-- `distribution_spec_hash` 折叠 `DistributionSpec`（阈值/分位）+ `distribution_spec_version`
-  + `FORECAST_METRIC_REGISTRY_VERSION`。同一批 raw samples 在不同 spec 下会产出
-  不同 `ForecastDistribution` 字段；spec 不进 key 会让「改阈值后仍返回旧概率」。
+- `distribution_spec_hash` 折叠 `DistributionSpec`（阈值/分位，含其 `version`）
+  + `FORECAST_METRIC_REGISTRY_VERSION` + `FORECAST_AGGREGATION_DEFINITION_VERSION`。
+  同一批 raw samples 在不同 spec 或不同指标/聚合口径下会产出不同
+  `ForecastDistribution` 字段；不进 key 会让「改阈值/改聚合后仍返回旧分布」。
 - 模型维必须**整体**取自 `artifact_identity()`：缺任一键显式失败
   （`ConfigurationError`），runtime docstring 明确禁止缓存实现挑子集。非字符串值也
   显式失败——否则 `str(None)` 会静默造出一个合法但错误的 identity。
@@ -85,6 +86,7 @@ symbol / market_date / knowledge_cutoff     → ArtifactError
 input_data_hash                             → ArtifactError
 distribution.horizon / sample_count         → ArtifactError
 distribution.distribution_spec_hash         → ArtifactError
+distribution.metric_definition_version / aggregation_definition_version → ArtifactError
 sampling.{seed, sample_count, temperature, top_k, top_p} → ArtifactError
 model.{model_id, revision, runtime_version, device, dtype, config_hash} → ArtifactError
 sample 的 point 时间轴 != key.future_sessions → ArtifactError
@@ -124,14 +126,22 @@ RX-KAI-015；届时 `FileSystemForecastCache` 可被 store 实现替换而不改
 
 - 同一 key 的重复推理在 `cached_forecast` 层被消除；`--force` 是唯一重算入口，
   且必然重写缓存。
+- key 契约一旦变更，golden digest 与所有缓存同时失效——这是刻意的，避免新旧产物
+  混用。RX-KAI-013 加入 `future_sessions` / `distribution_spec_hash` 属于 key 契约变更，
+  同时 `ForecastDistribution` 新增 `distribution_spec_hash` 字段（`ForecastResult`
+  schema 变更），当时 `FORECAST_CONTRACT_VERSION` 升到 `forecast-contract-v2`。
+- 评审加固（RX-KAI-013 之后）把 `FORECAST_CONTRACT_VERSION` 再升到
+  `forecast-contract-v3`：`ForecastDistribution` 新增 `origin_close`（P_0，§13 指标的
+  基准，落盘后 artifact 可被第三方独立重算）与 `aggregation_definition_version`
+  （跨样本聚合口径的版本）。二者均为必填字段：旧 v2 artifact 因 key 失效+反序列化
+  失败而被显式淘汰（版本白名单只保证「旧 metric/aggregation 版本仍可反序列化」，
+  不承诺兼容新增必填 schema 字段）。同时 `distribution_spec_hash` 不再重复写模块常量版本号，
+  只以 `spec.version` 为准，并折叠聚合版本；`_verify` 增加 metric/aggregation 版本的
+  显式逐维比对。golden digest、`test_forecast_request.py` 的两个 golden hash 与
+  `test_distribution.py` 的 `distribution_spec_hash` golden 同步更新。
 - Benchmark / walk-forward 的成本曲线可归因：命中数 = 省下的推理次数。
 - artifact 身份错误从「结果悄悄变了」降级为「构造期显式失败」：key 少字段、模型
   identity 不全、provenance 未回填都会立刻报错。
-- key 契约一旦变更，golden digest 与所有缓存同时失效——这是刻意的，避免新旧产物
-  混用。本次加入 `future_sessions` / `distribution_spec_hash` 属于 key 契约变更，
-  同时 `ForecastDistribution` 新增 `distribution_spec_hash` 字段（`ForecastResult`
-  schema 变更），故 `FORECAST_CONTRACT_VERSION` 升到 `forecast-contract-v2`，
-  `tests/unit/test_forecast_request.py` 的两个 golden hash 同步更新。
 - 日历 provenance（`TradingCalendar.exchange` / `source`）目前**不**记入 artifact：
   影响输出的部分是未来 session 时间轴，已由 `future_sessions` 进 key。把 exchange/source
   也写进 run metadata（§31/§32）属 RX-KAI-015，不阻塞本任务的缓存正确性。
