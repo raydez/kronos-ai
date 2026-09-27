@@ -13,6 +13,9 @@ dependencies = [
     "tzdata>=2026.4",
 ]
 
+[project.scripts]
+kronos-ai = "kronos_ai.cli.main:main"
+
 [dependency-groups]
 # Kronos 模型运行时依赖（vendor/ 下上游模型代码 + sampler 需要）。
 # dev 组包含 model 组：sampler 可复现性回归测试属强制 CI 项（§54.2，DoD 32）。

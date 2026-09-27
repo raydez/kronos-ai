@@ -56,6 +56,7 @@ from typing import Any, Self, cast
 from pydantic import ValidationError
 
 from kronos_ai.data.base import MarketDataProvider  # noqa: F401  (re-export contract)
+from kronos_ai.data.calendar import Exchange, StaticTradingCalendar
 from kronos_ai.data.universe import (
     EXPECTED_MEMBER_COUNT,
     UNIVERSE_ID_HS300,
@@ -709,6 +710,98 @@ class BaoStockUniverseLoader(_BaostockSessionClient):
                     per_page=self._per_page_count,
                 ),
                 label=f"universe {subject}",
+                timeout=self._hard_timeout,
+                on_timeout=self._session.break_socket,
+            )
+
+
+class BaoStockTradingCalendarLoader(_BaostockSessionClient):
+    """从 ``query_trade_dates`` 装载生产 TradingCalendar（§6.6；ADR-009）。
+
+    只如实搬运服务端给出的 session 序列，不做工作日规则推导。
+
+    已知边界（spike §1，artifact: checks.trade_dates）：
+
+    - 覆盖 ``1990-12-19`` 起；**跨年不可用**：请求超出已发布范围时服务端 ``error_code=0``
+      但返回 0 行（静默空）。装载器把空结果转为显式 :class:`ProviderError`，不返回空日历；
+    - 因此年末 origin 且 horizon 跨年时，``next_sessions`` 会以覆盖不足显式失败，而不是
+      被静默缩短——这正是 ADR-009 要求的语义。
+    """
+
+    def __init__(
+        self,
+        *,
+        baostock_module: ModuleType | None = None,
+        hard_timeout_seconds: float = BAOSTOCK_HARD_TIMEOUT_SECONDS,
+    ) -> None:
+        super().__init__(
+            baostock_module=baostock_module, hard_timeout_seconds=hard_timeout_seconds
+        )
+
+    def load(
+        self,
+        *,
+        start: date,
+        end: date,
+        exchange: Exchange = "SSE",
+    ) -> StaticTradingCalendar:
+        _require_plain_date(start, "start")
+        _require_plain_date(end, "end")
+        if start > end:
+            raise ConfigurationError(f"start {start} must be <= end {end}")
+        rows = self._collect_trade_dates(start, end)
+        if not rows:
+            raise ProviderError(
+                f"baostock query_trade_dates returned no rows for {start}..{end}: coverage "
+                "does not reach this range (the endpoint silently returns empty beyond the "
+                "published calendar, see ADR-009)"
+            )
+        sessions: list[date] = []
+        seen: set[date] = set()
+        for idx, row in enumerate(rows):
+            try:
+                day = date.fromisoformat(str(row["calendar_date"]))
+                is_trading = str(row["is_trading_day"]).strip()
+            except (KeyError, TypeError, ValueError) as exc:
+                raise DataQualityError(
+                    f"baostock returned malformed trade-date row #{idx}: {exc}"
+                ) from exc
+            if is_trading not in {"0", "1"}:
+                raise DataQualityError(
+                    f"baostock trade-date row #{idx} has unknown is_trading_day "
+                    f"{is_trading!r}"
+                )
+            if day in seen:
+                raise DataQualityError(
+                    f"baostock trade-date response repeats calendar_date {day}"
+                )
+            seen.add(day)
+            if is_trading == "1":
+                sessions.append(day)
+        if not sessions:
+            raise ProviderError(
+                f"baostock query_trade_dates returned no trading sessions for {start}..{end}"
+            )
+        return StaticTradingCalendar(
+            exchange=exchange,
+            source="baostock:query_trade_dates",
+            sessions=tuple(sorted(sessions)),
+        )
+
+    def _collect_trade_dates(self, start: date, end: date) -> list[dict[str, str]]:
+        self._ensure_session()
+        subject = f"trade_dates {start}..{end}"
+        with self._session.lock:
+            return _run_bounded(
+                lambda: _run_query(
+                    lambda: self._bs.query_trade_dates(
+                        start_date=start.isoformat(), end_date=end.isoformat()
+                    ),
+                    label="query_trade_dates",
+                    subject=subject,
+                    per_page=self._per_page_count,
+                ),
+                label=subject,
                 timeout=self._hard_timeout,
                 on_timeout=self._session.break_socket,
             )
