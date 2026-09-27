@@ -24,10 +24,25 @@ LICENSE（不得凭印象），并在 vendor 目录保留原始 license 声明�
 规则：
 
 ```text
-vendor 目录 = upstream 逐字节副本（仅允许 import 路径适配）
-原始 LICENSE 与 UPSTREAM.md（来源/commit/日期/改动清单）随代码入库
+vendor 目录 = upstream 逐字节副本，只允许两类机械偏差，且必须逐条登记在
+UPSTREAM.md 并可用 tests/integration/test_vendor_provenance.py 在线复核：
+  (a) import 路径适配（kronos.py 的 4 行头部替换）
+  (b) 行尾归一化（module.py 上游 CRLF → 本目录 LF；去 CR 后逐字节相同）
+另有一个 v2 自写文件 vendor/__init__.py（import shim，无任何数值逻辑），
+是「vendor 不放 v2 逻辑」约束下唯一且显式声明的例外。
+原始 LICENSE 与 UPSTREAM.md（来源/commit/日期/逐文件 sha256/改动清单）随代码入库
 v2 自身逻辑（raw sample 截取、per-run RNG、去 mean）不写入 vendor 目录，
 放在受控 adapter（sampler.py），升级上游 = 整目录替换 + 重跑等价性回归
+```
+
+核验方式（不靠记忆）：
+
+```text
+UPSTREAM.md 给出每个文件的上游 sha256 与本目录 sha256
+tests/integration/test_vendor_provenance.py 重新计算本目录 sha256 并与表格比对
+（离线，默认门禁运行；vendor 文件或表格被改动都会失败）
+同文件按 pinned commit 在线比对上游内容
+（集成测试，`-m integration` 手动/CI 触发；上游漂移会被检出）
 ```
 
 ### 2. 模型权重 License
@@ -53,6 +68,14 @@ Benchmark Report 可发布：aggregated metrics / methodology / config
 
 BaoStock 使用条款的再分发结论随 Phase 2 数据处理任务（RX-KAI-017 数据落盘）复核，
 若条款不允许再分发，则 artifacts 保持本地、报告只含聚合指标。
+
+## 修订记录
+
+- 2026-09-27（RX-KAI-009 施工期核验）：原文写作「逐字节副本（仅允许 import 路径适配）」，
+  实际核验发现两处未登记的偏差——`module.py` 上游为 CRLF、本目录为 LF；`__init__.py`
+  是 v2 自写 import shim（上游同名文件是训练侧注册表）。二者均无语义差异，已按上述
+  规则登记到 `UPSTREAM.md` 并补上可执行的在线核验测试。原文措辞与实际不一致本身即
+  本次修订的动因：provenance 声明必须与仓库实态一致，否则审计结论不可信。
 
 ## 后果
 

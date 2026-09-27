@@ -31,6 +31,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.11",
     "types-PyYAML",
+    "types-tqdm",
     "pandas-stubs>=3.0.5.260914",
 ]
 

@@ -23,6 +23,14 @@ class UniverseError(KronosAIError):
     """Universe constituents are unavailable for the requested point in time (§6.2)."""
 
 
+class ModelLoadError(KronosAIError):
+    """Model or tokenizer checkpoint could not be loaded or failed post-load verification.
+
+    Distinct from ModelInferenceError: the failure happens before any inference, and the
+    caller must not retry with silently different weights (§17).
+    """
+
+
 class ModelInferenceError(KronosAIError):
     """Forecast backend inference or output parsing failed; no random OHLC."""
 
